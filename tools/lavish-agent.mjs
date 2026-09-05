@@ -19,12 +19,65 @@ export const OSASCRIPT_BIN = "/usr/bin/osascript";
 export const CLAUDE_BIN = join(os.homedir(), ".local/bin/claude");
 export const CODEX_BIN = join(os.homedir(), ".local/bin/codex");
 export const TMUX_PANE_COLS = 160, TMUX_PANE_ROWS = 48, TMUX_TIMEOUT_MS = 8000, TMUX_ENTER_DELAY_MS = 250;
-/** Same table as Manager Marcus's LAUNCH_OPTIONS (server/src/constants.ts). Codex models are free text too. */
+/** The static table Manager Marcus also carries (server/src/constants.ts); the live lists come from ~/.lavish-axi/models.json (D7). */
 export const LAUNCH_OPTIONS = {
   claude: { models: ["default", "fable", "opus", "sonnet", "haiku"], efforts: ["default", "low", "medium", "high", "xhigh", "max"] },
-  codex: { models: ["default"], efforts: ["default", "low", "medium", "high", "xhigh"] },
+  codex: { models: ["default", "gpt-6-astra", "gpt-6-sol", "gpt-6-terra", "gpt-6-luna"], efforts: ["default", "low", "medium", "high", "xhigh"] },
 };
 export const terminalsPath = () => join(stateDir, "terminals.json");
+
+/* ── models.json: the model lists Marcus edits (plan 2026-09-05, D7) ─────────── */
+/* { claude: { models: [{id, name, full?}], efforts: [...] }, codex: { models: [{id, name}], efforts: [...] }, note }
+ * `id` is what the CLI flag receives (claude --model fable · codex -m gpt-6-astra); `name` is what the page shows;
+ * `full` is the id the transcript writes (claude-fable-5-1), so the Session column can name it. Seeded on first read;
+ * a new model is one line in the file, not a code change. Free text stays accepted in every form. */
+export const modelsPath = () => join(stateDir, "models.json");
+export const DEFAULT_MODELS = {
+  claude: { models: [
+    { id: "fable", name: "Fable 5.1", full: "claude-fable-5-1" },
+    { id: "opus", name: "Opus 5", full: "claude-opus-5" },
+    { id: "sonnet", name: "Sonnet 5", full: "claude-sonnet-5" },
+    { id: "haiku", name: "Haiku 4.5", full: "claude-haiku-4-5-20251001" },
+  ], efforts: ["low", "medium", "high", "xhigh", "max"] },
+  codex: { models: [
+    { id: "gpt-6-astra", name: "GPT-6 Astra" },
+    { id: "gpt-6-sol", name: "GPT-6 Sol" },
+    { id: "gpt-6-terra", name: "GPT-6 Terra" },
+    { id: "gpt-6-luna", name: "GPT-6 Luna" },
+  ], efforts: ["low", "medium", "high", "xhigh"] },
+  note: "Edit freely: the home page re-reads this file when it changes. The Claude 5.6 ids were unknown on 2026-09-05: add them as {id, name, full} lines under claude.models. Codex ids beyond gpt-6-astra are assumed (gpt-6-sol, -terra, -luna); correct them here if Codex refuses one.",
+};
+let modelsCache = { path: "", mtime: -1, value: null };
+const cleanModel = (m) => (m && typeof m === "object" && String(m.id || "").trim() ? { id: String(m.id).trim(), name: String(m.name || m.id).trim(), ...(m.full ? { full: String(m.full).trim() } : {}) } : null);
+/** The lists, validated, seeded when the file is missing, cached by the file's mtime. Never throws. */
+export function readModels(path = modelsPath()) {
+  let mtime = -1;
+  try { mtime = statSync(path).mtimeMs; } catch { try { writeJsonAtomic(path, DEFAULT_MODELS); mtime = statSync(path).mtimeMs; } catch { /* unwritable: defaults */ } }
+  if (modelsCache.path === path && modelsCache.mtime === mtime && modelsCache.value) return modelsCache.value;
+  const raw = readJson(path, null) || {};
+  const out = { note: String(raw.note || "") };
+  for (const p of ["claude", "codex"]) {
+    const r = raw[p] && typeof raw[p] === "object" ? raw[p] : {};
+    const models = (Array.isArray(r.models) ? r.models : []).map(cleanModel).filter(Boolean);
+    const efforts = (Array.isArray(r.efforts) ? r.efforts : []).map((e) => String(e || "").trim().toLowerCase()).filter((e) => /^[a-z]+$/.test(e));
+    out[p] = { models: models.length ? models : DEFAULT_MODELS[p].models, efforts: efforts.length ? efforts : DEFAULT_MODELS[p].efforts };
+  }
+  modelsCache = { path, mtime, value: out };
+  return out;
+}
+/** The LAUNCH_OPTIONS shape built from models.json ("default" first, ids only). */
+export function launchOptions(models = readModels()) {
+  return { claude: { models: ["default", ...models.claude.models.map((m) => m.id)], efforts: ["default", ...models.claude.efforts] }, codex: { models: ["default", ...models.codex.models.map((m) => m.id)], efforts: ["default", ...models.codex.efforts] } };
+}
+/** "Fable 5.1" for fable / claude-fable-5-1; the id itself when the file does not know it; "" for empty or default. */
+export function modelName(id, models = readModels()) {
+  const s = String(id || "").trim(); if (!s || s === "default") return "";
+  const k = s.toLowerCase();
+  for (const p of ["claude", "codex"]) for (const m of models[p].models) if (m.id.toLowerCase() === k || (m.full && m.full.toLowerCase() === k)) return m.name;
+  return s;
+}
+/** "High", "XHigh", "Max": the effort word as the page shows it. */
+export const effortName = (e) => { const s = String(e || "").trim(); if (!s || s === "default") return "Default"; return s === "xhigh" ? "XHigh" : s[0].toUpperCase() + s.slice(1); };
 
 /* ── process seam ─────────────────────────────────────────────────────── */
 /** {code, stdout, stderr}; a missing binary is code -1 with its message in stderr, a timeout is code -2. */
@@ -53,8 +106,9 @@ export function childEnv(env = process.env) {
 export const tmuxName = (provider, id) => `mm-${provider === "codex" ? "codex" : "claude"}-${String(id).toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 8)}`;
 export const shellQuote = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 const flag = (name, v) => (v && v !== "default" ? [name, String(v)] : []);
-const okModel = (provider, m) => { const s = String(m || "").trim(); if (!s || s === "default") return ""; return provider === "codex" ? (/^[\w.\-:]+$/.test(s) ? s : "") : (LAUNCH_OPTIONS.claude.models.includes(s) ? s : ""); };
-const okEffort = (provider, e) => (LAUNCH_OPTIONS[provider].efforts.includes(String(e || "")) && e !== "default" ? String(e) : "");
+/** A model id for the CLI flag: a listed id, or free text that looks like one (D7 keeps free text for both providers). */
+const okModel = (provider, m) => { const s = String(m || "").trim(); if (!s || s === "default") return ""; return /^[\w.\-:]+$/.test(s) ? s : ""; };
+const okEffort = (provider, e) => (launchOptions()[provider === "codex" ? "codex" : "claude"].efforts.includes(String(e || "")) && e !== "default" ? String(e) : "");
 export function claudeResumeArgv(bin, id, { model, effort } = {}) { return [bin, "--resume", String(id), ...flag("--model", okModel("claude", model)), ...flag("--effort", okEffort("claude", effort))]; }
 export function claudeNewArgv(bin, { sessionId, model, effort, prompt }) { return [bin, "--session-id", String(sessionId), ...flag("--model", okModel("claude", model)), ...flag("--effort", okEffort("claude", effort)), "--", String(prompt || "")]; }
 export function codexResumeArgv(bin, id, { model, effort } = {}) { const e = okEffort("codex", effort); return [bin, "resume", String(id), ...flag("-m", okModel("codex", model)), ...(e ? ["-c", `model_reasoning_effort="${e}"`] : [])]; }

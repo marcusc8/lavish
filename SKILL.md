@@ -128,30 +128,47 @@ their CLIs are on PATH via `~/.local/bin`.
   SDK or server edit that is already applied, reinstall the pinned version first
   (`npm i -g lavish-axi@$(cat tools/pinned-version.txt)`) and run `node tools/patch-lavish.mjs` again.
 
-### Home page — `http://127.0.0.1:4388` (`tools/lavish-home.mjs`, launchd `com.marcus.lavish-home`; Drive layout since 2026-09-04)
+### Home page — `http://127.0.0.1:4388` (`tools/lavish-home.mjs`, launchd `com.marcus.lavish-home`; Drive-style "Sheet" layout since 2026-09-05, plan `.lavish/2026-09-05-lavish-home-redesign.html`)
 
-- **Layout**: a sidebar (All plans · Active now · one virtual folder per project for UNFILED plans · your folders,
-  nested · "+ New folder"), a strip of the sessions that are running right now (click one to jump to its plan), folder
-  tiles, then one table per project or subfolder. Default columns: **Plan** (monogram + title; hover the title for the
-  summary, PRs, review counts, versions, latest progress) · **Folder** · **Status** (stage tag, plan chip, inline status
-  select) · **Session** (the AGENT state first: not connected · active · in terminal · ended, with the session name, a
-  pulsing dot when live, a dotted name when it came from the transcript scan; Lavish's own review state as the second
-  line) · **Actions** (View · Resume · New session · Log · Move to… · Retire). Column widths drag (remembered per
-  browser). Light and dark palettes: ◐ in the top bar (follows the system until you pick; saved per browser). Every
-  text/background token pair is checked at startup for WCAG AA 4.5:1 (`node tools/lavish-home.mjs --check-contrast`);
-  a failing pair stops the server with the pair named.
-- **Folders** (`~/.lavish-axi/home-layout.json`, separate from the registry so `lavish-meta` can never clobber
-  them): drag a row onto a folder in the sidebar or a tile, or a folder onto a folder (cycles are refused and greyed
-  while dragging); Move-to in the row is the keyboard path. Deleting a folder moves its subfolders and plans up one
-  level. `PUT /api/layout {op: file|move|create|rename|delete, …}` behind all of it.
+- **Layout**: white ground, Schibsted Grotesk + IBM Plex Mono. A **sidebar** (All plans · Active now · **projects with
+  their plans nested**, 5 newest each + Show more, drag a project onto a project or a plan onto a plan to reorder
+  (saved server-side; the tables follow), click a project to collapse it (remembered), hover a plan for its preview
+  card, drag the edge to resize, a hide button and ← → that step through the plans in sidebar order (also the arrow
+  keys outside a text field) · **Tags** with counts · "+ New tag"). Then one **Drive-style filter row** (Agent · Stage ·
+  Plan · Priority · Lavish · Tags as popovers; nothing moves when one opens) with a **Columns** button, and one table
+  per project (5 newest rows on the home view + "Show 10 more"; a project page lists all). Default columns: **Plan**
+  (title + v{n}, `high` pill; hover for summary, Plan/Build with their reason, PRs, review counts, latest progress,
+  agent, path — the card is drawn at page level so no table clips it) · **Plan status** (dot + word; the select
+  appears on hover) · **Build** (D4: Not started · Developing · PR open · Merging · Merged · Needs review · Verified,
+  derived from status + PR states) · **Session** (name, then Model · place · N tabs) · **Modified** · **Added** ·
+  **Actions** (View · Resume · ⋯). Recorded but off by default, from the Columns button: Tags · Priority · Project ·
+  Completed · Retired · Versions · Reviews. Double-click a header to sort (asc → desc → newest first; status columns
+  by stage order; remembered). Right-click a row (or Shift+F10, or ⋯) for Open in Lavish · New session… · Restart ·
+  Log · Tag › · End session and close tabs · Close other tabs · Retire. Column widths, columns, sort, sidebar width,
+  hidden state, collapsed projects and the palette (◐) are remembered per browser. Every text/background token pair
+  is checked at startup for WCAG AA 4.5:1 (`node tools/lavish-home.mjs --check-contrast`); a failing pair stops the
+  server with the pair named. Fluid width, no horizontal scroll at 1280 px.
+- **Tags** (`~/.lavish-axi/home-layout.json` v2, separate from the registry so `lavish-meta` can never clobber it;
+  a v1 folders file migrates on first read and is kept as `.v1.bak`): a plan carries any number of tags; create one in
+  the sidebar, assign from the row menu's Tag › (ticks), the plan page's tag row, or by dragging a row or a sidebar
+  plan onto a tag; `?tag=<tid>` filters. `PUT /api/layout {op: tag|untag|tag-create|tag-rename|tag-delete|
+  order-projects|order-plans}` behind all of it.
 - **Agent link** (`registry.json` → `agent` + `agents[]`): `lavish-poll` and `lavish-meta` stamp the session
   that ran them (Claude from `CLAUDE_CODE_SESSION_ID`; Codex by matching the newest live rollout of the folder). The
   page reads liveness from `~/.claude/sessions/<pid>.json` + a pid check and from Codex's writer locks; "in terminal"
-  = its tmux session exists. **Run `lavish-poll` / `lavish-meta` from the working session** so Resume knows who you
-  are: a session that only reads a plan is linked only by the bounded transcript scan (last 7 days of the plan's project
-  folder, Read/Edit/Write targets only; at startup, hourly, and "Find sessions" on the plan page) and shows dotted until
-  it polls for real. Every history row carries `agent {provider,id}`; when the id changes, the poll posts one
-  "session changed: now <name> · <provider>" line into the chat.
+  = its tmux session exists. **The model comes from the transcript** (last assistant `message.model` in
+  `~/.claude/projects/<slug>/<id>.jsonl`, Codex `session_meta`), cached by mtime, named through `models.json`; the
+  remembered launch choice is the fallback, marked "(remembered)". **Run `lavish-poll` / `lavish-meta` from the working
+  session** so Resume knows who you are: a session that only reads a plan is linked only by the bounded transcript scan
+  (last 7 days of the plan's project folder, Read/Edit/Write targets only; at startup, hourly, and "Find sessions" on
+  the plan page) and shows dotted until it polls for real. Every history row carries `agent {provider,id}`; when the id
+  changes, the poll posts one "session changed: now <name> · <provider>" line into the chat.
+- **Browser tabs**: every Lavish tab pings `PUT /api/presence/<key>` every 10 s (the patched chrome); the row shows
+  "N tabs". **End session and close tabs** (`POST /end/<key>?close=1`) and **Close other tabs** mark them; a marked tab
+  closes itself on its next ping (a page can close only itself; a tab whose history is longer than one entry shows a
+  notice instead). **Restart** (`POST /restart/<key>`, D10) refuses while the plan's agent is live anywhere; otherwise
+  it ends the Lavish session, marks the tabs, and starts a NEW session with the plan's remembered provider / model /
+  effort and the default prompt, logging "restarted by the home page" in the registry.
 - **View** = `/view/<key>/`: the plan as it is on disk, no Lavish chrome, no session change; relative assets beside
   the plan are served, nothing outside its folder. **Resume** (`POST /connect/<key>`, model + effort remembered per
   plan): live in tmux → Terminal.app forward and the plan in Lavish · live in VS Code/Cursor/Desktop → the plan in
@@ -160,24 +177,36 @@ their CLIs are on PATH via `~/.local/bin`.
   resume <uuid> -m … -c model_reasoning_effort=…`) in the transcript's folder, Terminal.app attached, then the plan in
   Lavish. Same tmux names as Manager Marcus, so the two tools cannot double-resume. Refusals are pages naming the
   reason (folder missing, binary missing, Codex thread open in the app, tmux error verbatim). **New session**
-  (`?new=1`): provider, model, effort, folder and a first prompt (default: open this plan in Lavish and poll it) in a
-  fresh tmux terminal; Claude gets a chosen UUID stamped at once, Codex is matched by folder on its first poll.
-  Terminals this page starts are listed in `~/.lavish-axi/terminals.json` (Manager Marcus's row shape).
-- **Session page**: the Agent block (state, name, id, folder, stamp source; **Change effort** types `/effort <level>`
-  into an OWNED Claude terminal only while its pane is at the prompt, then shows the pane's reply — the CLI also saves
-  that level as the default for that model in `~/.claude/settings.json`; **Find sessions** runs the scan for this
-  plan), the conversation grouped per agent session (newest open, older collapsed, a Resume button per session),
-  plan-status form, folder select, Progress (stage strip, working sessions, notes, timeline), Versions (View · Diff →
-  previous / current · Restore, with the comments per version), commits, private comments, Unsent comments, Export.
+  (`?new=1`, in the plan page's Resume block; `GET /connect/<key>` redirects there): provider, model, effort, folder
+  and a first prompt (default: open this plan in Lavish and poll it) in a fresh tmux terminal; Claude gets a chosen UUID
+  stamped at once, Codex is matched by folder on its first poll. **Model lists live in `~/.lavish-axi/models.json`**
+  (seeded: Claude Fable 5.1 · Opus 5 · Sonnet 5 · Haiku 4.5, Codex GPT-6 Astra · Sol · Terra · Luna; efforts per
+  provider, Claude adds Max; a new model is one line; free text stays accepted). The model, effort and folder fields
+  are typeable comboboxes (arrow keys, Enter; the folder one suggests recent folders); **Choose in Finder…** runs an
+  async `osascript choose folder`. Terminals this page starts are listed in `~/.lavish-axi/terminals.json`.
+- **Plan page** (`/session/<key>`): the same sidebar, title + v{n} + **Rename** (rewrites the file's `<title>`,
+  snapshotted before and after), the stage line, an **Agent** block (state, session · provider · model, folder,
+  started; Change effort types `/effort <level>` into an OWNED Claude terminal only while its pane is at the prompt;
+  plan-status form; tags), the **Resume + New session** block with Restart, a **Sessions** table (model · where ·
+  started · last ended · browsers, from the transcripts), **History** (registry log status/PR/notes, PR merges, first
+  version, session starts and ends, terminals; hover a row for its source), **Versions** (Version · Saved · What
+  changed · Comments · View · Diff · Continue from ▾), Commits / Unsent / Export folded, and the **Conversation** with
+  the private comments in place by time.
 - **Versions** are saved by `lavish-poll` at every round and by the home page's 20-second scan, deduplicated by
-  content. Diffs compare the visible text. **Restore** snapshots the current file first, then writes the chosen version
-  over it; the Lavish tab offers a reload, but **the agent is not told** (the history file gets a `restore` entry).
+  content. `/version/<key>/<n>/` shows the snapshot in an iframe beside that moment's comments, messages, replies and
+  private notes, with **Continue from ▾**: just restore · restore and Resume · restore and start a New session
+  (`POST /restore/<key>/<n>?then=resume|new`). Restore snapshots the current file first, then writes the chosen
+  version over it; the Lavish tab offers a reload, but **the agent is not told** (the history file gets a `restore`
+  entry).
+- **Naming rule for new plans (D8)**: the `<title>` says what the plan decides, entity first, 3 to 7 words, no dates
+  or codes ("Samples shipments, bins, ladder and lists", not "2026-09-04-samples-logistics-and-lists"). Existing plans
+  keep their titles until renamed on their plan page.
 - **Front-matter for new artifacts**: `<meta name="lavish:project" content="StyleManager-2.0">`,
-  `<meta name="description" content="one sentence: what this plan decides">`, optionally `lavish:related` and
-  `<meta name="lavish:logo" content="assets/logo.svg">` to replace the generated monogram. Status and PRs go through
-  `lavish-meta`.
-- `/api/sessions` carries `folder {id,name,path}` and `agent {provider,id,state,name,terminal,tmuxName,…}` per plan
-  (Manager Marcus's terminal canvas reads it). Mention the home page when handing over an artifact.
+  `<meta name="description" content="one sentence: what this plan decides">`, optionally `lavish:related`. Status and
+  PRs go through `lavish-meta`.
+- `/api/sessions` carries `tags [{id,name}]`, `tabs`, `build`, `added` and `agent {provider,id,state,name,model,
+  terminal,tmuxName,…}` per plan (Manager Marcus's terminal canvas reads it). Mention the home page when handing over
+  an artifact.
 
 ## Request
 
@@ -236,7 +265,9 @@ self-contained .html: vanilla JS, no build step, the Mermaid CDN as the only ext
 directly with no server). Reference implementation of the skeleton: StyleManager
 `.lavish/2026-09-02-lavish-planning-upgrades.html`. The skeleton, which Marcus approved on 2026-09-02:
 
-- **Front-matter**: `<title>`, `<meta name="description">` (one sentence, the home page shows it),
+- **Front-matter**: `<title>` (the naming rule, D8 of the home redesign: what the plan decides, entity
+  first, 3 to 7 words, no dates or codes — the home page and the Lavish tab show it verbatim; a plan can be
+  renamed later on its home plan page), `<meta name="description">` (one sentence, the home page shows it),
   `lavish:project`, and `lavish:related` when it builds on another plan.
 - **Reading order is fixed**: 1 Read this first (the answer in one paragraph inside `.answer`, then
   "What changed in this version"; older rounds under a collapsed "Earlier rounds") · 2 Decisions (every

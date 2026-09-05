@@ -27,6 +27,7 @@
  *   POST /restore/<key>/<n>[?then=resume|new]   put version n back onto disk (the replaced file is snapshotted first), then optionally Resume / New session
  *   POST /restart/<key>       D10: refuse if the agent is live; else end the Lavish session, mark its tabs to close, start a new agent on the plan
  *   POST /rename/<key>        rewrite the plan file's <title> (snapshotted before and after)
+ *   POST /pick-folder         {start} → osascript "choose folder" (async, 5-minute cap) → {path} | {cancelled} | {error}
  *   PUT  /api/presence/<key>  {tab, title}: a Lavish tab's 10 s ping → {close: bool}; POST ?gone=1&tab= on unload; GET the open tabs
  *   POST /end/<key>?close=1   end the Lavish session and tell every tab of the plan to close itself; POST /tabs/<key>/close keeps the newest tab
  *   POST /open|end/<key>      resume / end the Lavish session
@@ -61,7 +62,7 @@ import {
 } from "./lavish-lib.mjs";
 import {
   liveClaudeSessions, liveCodexThreads, listTmux, listClients, agentState, resumeAgent, startNewAgent, sendText, capturePane, paneIdle,
-  scanTranscriptsMany, scanTranscripts, readTerminals, LAUNCH_OPTIONS, defaultNewPrompt, tmuxName, CLAUDE_BIN, CODEX_BIN, TMUX_BIN, sessionInfoOf,
+  scanTranscriptsMany, scanTranscripts, readTerminals, launchOptions, readModels, modelName as modelNameOf, effortName, defaultNewPrompt, tmuxName, CLAUDE_BIN, CODEX_BIN, TMUX_BIN, sessionInfoOf,
 } from "./lavish-agent.mjs";
 
 const PORT = Number(process.env.LAVISH_HOME_PORT || 4388);
@@ -336,9 +337,10 @@ const ICON = {
   tag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/></svg>',
   hide: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>',
 };
-/** Model ids → the names Marcus reads (CS3 moves this list to ~/.lavish-axi/models.json). */
-const MODEL_NAMES = { fable: "Fable 5.1", "claude-fable-5-1": "Fable 5.1", opus: "Opus 5", "claude-opus-5": "Opus 5", sonnet: "Sonnet 5", "claude-sonnet-5": "Sonnet 5", haiku: "Haiku 4.5", "claude-haiku-4-5": "Haiku 4.5", "claude-haiku-4-5-20251001": "Haiku 4.5", "gpt-6-astra": "GPT-6 Astra", "gpt-6-sol": "GPT-6 Sol", "gpt-6-terra": "GPT-6 Terra", "gpt-6-luna": "GPT-6 Luna" };
-const modelName = (id) => { const s = String(id || "").trim(); if (!s || s === "default") return ""; return MODEL_NAMES[s] || MODEL_NAMES[s.toLowerCase()] || s; };
+/** Model ids → the names Marcus reads, from ~/.lavish-axi/models.json (an unknown id shows as itself). */
+const modelName = (id) => modelNameOf(id);
+/** What the page's JS needs to re-render the model and effort lists when the provider changes. */
+const modelsForClient = () => { const M = readModels(); const one = (p) => ({ models: M[p].models.map((m) => ({ id: m.id, name: m.name })), efforts: M[p].efforts.map((e) => ({ id: e, name: effortName(e) })) }); return { claude: one("claude"), codex: one("codex") }; };
 /** The Build column (D4): what the PRs and the status say about the implementation, as a word with a rank for sorting. */
 const BUILDS = [["not-started", "Not started", "mute"], ["developing", "Developing", "warn"], ["pr-open", "PR open", "acc"], ["merging", "Merging", "acc"], ["merged", "Merged", "good"], ["needs-review", "Needs review", "viol"], ["verified", "Verified", "good"]];
 function buildOf(status, prs) {
@@ -436,6 +438,7 @@ button.b{font:inherit;font-size:12.5px;padding:5px 11px;border:1px solid var(--a
 .thumbs{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}.thumbs img{width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--rule);display:block}
 .vcomments summary{cursor:pointer;color:var(--acc);font-size:12.5px;white-space:nowrap}.vcomments .note{margin:6px 0 0;max-width:520px;font-size:12.5px}.vcomments .note .anc{font-size:11.5px}
 pre.pane{background:#1a1d21;color:#e8e6e1;padding:10px 12px;border-radius:8px;font:12px/1.4 "IBM Plex Mono",ui-monospace,Menlo,monospace;overflow-x:auto;max-width:900px;white-space:pre-wrap}
+.cb{position:relative;display:inline-block;min-width:0}.cb-native{position:absolute;opacity:0;pointer-events:none;width:1px;height:1px;overflow:hidden;left:0;top:0}.cbi{font:inherit;font-size:12.5px;padding:4px 7px;border:1px solid var(--rule);border-radius:7px;background:var(--paper);color:var(--ink);min-width:150px}.cbi:focus{outline:2px solid var(--focus);outline-offset:-1px}.cbl{position:absolute;left:0;top:calc(100% + 4px);z-index:9;min-width:100%;max-height:240px;overflow:auto;background:var(--surface);border:1px solid var(--rule);border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.14);padding:4px}.cbo{padding:5px 9px;border-radius:6px;cursor:pointer;font-size:13px;color:var(--ink);white-space:nowrap;display:flex;justify-content:space-between;gap:12px}.cbo:hover,.cbo.hi{background:var(--hover)}.cbo.on{color:var(--acc);font-weight:600}.cbo.none{color:var(--ink3);cursor:default}.cbv{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:11px;color:var(--ink3)}
 details.fold{margin:8px 0}details.fold>summary{cursor:pointer;color:var(--acc);font-size:13px;list-style:none}details.fold>summary::-webkit-details-marker{display:none}details.fold>summary::before{content:"\\203A";display:inline-block;margin-right:6px;transition:transform .12s}details.fold[open]>summary::before{transform:rotate(90deg)}details.fold .in{margin:8px 0 0}
 .errpage{max-width:640px;margin:60px auto;padding:0 20px}.errpage h1{font-size:22px}.errpage p{font-size:15px}
 `;
@@ -443,6 +446,7 @@ const CLIENT_JS = `
 (function(){
   var KEY="lavish-home:theme",W="lavish-home:cols",COLK="lavish-home:columns",SORTK="lavish-home:sort",SIDEW="lavish-home:side",SIDEH="lavish-home:side-hidden",PROJK="lavish-home:proj";
   function ls(k,d){try{var v=localStorage.getItem(k);return v===null?d:JSON.parse(v);}catch(e){return d;}}function lsSet(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
+  function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
   function apply(t){if(t)document.documentElement.setAttribute("data-theme",t);else document.documentElement.removeAttribute("data-theme");}
   try{apply(localStorage.getItem(KEY)||"");}catch(e){}
   var tb=document.getElementById("themeToggle");
@@ -508,6 +512,38 @@ const CLIENT_JS = `
   function step(dir){var links=planLinks();if(!links.length)return;var cur=document.body.dataset.key||"";var i=-1;links.forEach(function(a,j){if(a.dataset.key===cur)i=j;});var j=i<0?(dir>0?0:links.length-1):(i+dir+links.length)%links.length;location.href=links[j].getAttribute("href");}
   var pb=document.getElementById("prevPlan"),nb=document.getElementById("nextPlan");if(pb)pb.addEventListener("click",function(){step(-1);});if(nb)nb.addEventListener("click",function(){step(1);});
   document.addEventListener("keydown",function(e){if(e.metaKey||e.ctrlKey||e.altKey)return;var t=e.target;if(t&&(t.tagName==="INPUT"||t.tagName==="TEXTAREA"||t.tagName==="SELECT"||t.isContentEditable))return;if(e.key==="ArrowLeft")step(-1);else if(e.key==="ArrowRight")step(1);});
+  /* comboboxes (CS3): a typeable input over each select[data-combo]; the native select still posts; arrows + Enter; free text goes to data-free */
+  var MODELS=window.__MODELS||null;
+  function labelOf(sel){var o=sel.options[sel.selectedIndex];return o?o.textContent:"";}
+  function initCombo(sel){if(sel.dataset.cbReady)return;sel.dataset.cbReady="1";var wrap=document.createElement("span");wrap.className="cb";if(sel.style.flex){wrap.style.flex=sel.style.flex;wrap.style.display="flex";}sel.parentNode.insertBefore(wrap,sel);wrap.appendChild(sel);sel.classList.add("cb-native");sel.tabIndex=-1;
+    var inp=document.createElement("input");inp.type="text";inp.className="cbi";inp.autocomplete="off";inp.spellcheck=false;inp.setAttribute("role","combobox");inp.setAttribute("aria-expanded","false");inp.setAttribute("aria-label",(sel.closest("label")||{}).textContent||sel.name);if(sel.dataset.role==="folder")inp.style.flex="1";
+    var list=document.createElement("div");list.className="cbl";list.hidden=true;wrap.appendChild(inp);wrap.appendChild(list);
+    var free=sel.dataset.free&&sel.form?sel.form.querySelector('[name="'+sel.dataset.free+'"]'):null;var always=sel.dataset.role==="folder";
+    function sync(){var f=free&&free.value;inp.value=f&&(!sel.value||always)?f:labelOf(sel);}
+    sync();var hi=-1,items=[];
+    function opts(){return [].map.call(sel.options,function(o){return {v:o.value,t:o.textContent};});}
+    function starts(o,s){return (o.t.toLowerCase()+" "+o.v.toLowerCase()).split(/[\s\-_./:]+/).some(function(w){return w.indexOf(s)===0;});}
+    function render(q){var s=(q||"").toLowerCase();var all=opts();items=!s?all:all.filter(function(o){return starts(o,s);});if(s&&!items.length)items=all.filter(function(o){return o.t.toLowerCase().indexOf(s)!==-1||o.v.toLowerCase().indexOf(s)!==-1;});list.innerHTML=items.map(function(o,i){return '<div class="cbo'+(o.v===sel.value?" on":"")+'" data-i="'+i+'"><span>'+esc(o.t)+'</span>'+(o.v&&o.v!==o.t?'<span class="cbv">'+esc(o.v)+'</span>':"")+'</div>';}).join("")||'<div class="cbo none">'+(free?"free text: "+esc(inp.value):"no match")+'</div>';list.hidden=false;inp.setAttribute("aria-expanded","true");hi=-1;}
+    function close(){list.hidden=true;inp.setAttribute("aria-expanded","false");hi=-1;}
+    function choose(o){sel.value=o.v;if(free){free.value=always?o.v:"";}inp.value=o.t;sel.dispatchEvent(new Event("change",{bubbles:true}));close();}
+    function commitText(){var t=inp.value.trim();var m=opts().filter(function(o){return o.t.toLowerCase()===t.toLowerCase()||o.v.toLowerCase()===t.toLowerCase();})[0];if(m){if(sel.value!==m.v||(free&&free.value&&!always))choose(m);else inp.value=m.t;return;}if(free){free.value=t;if(!always)sel.value="";}else sync();}
+    inp.addEventListener("focus",function(){inp.select();render("");});inp.addEventListener("input",function(){render(inp.value);if(always&&free)free.value=inp.value;});
+    inp.addEventListener("keydown",function(e){if(e.key==="ArrowDown"||e.key==="ArrowUp"){if(list.hidden)render(inp.value);e.preventDefault();var n=list.querySelectorAll(".cbo:not(.none)");if(!n.length)return;hi=(hi+(e.key==="ArrowDown"?1:-1)+n.length)%n.length;n.forEach(function(el,i){el.classList.toggle("hi",i===hi);});n[hi].scrollIntoView({block:"nearest"});}
+      else if(e.key==="Enter"){if(!list.hidden){e.preventDefault();var n2=list.querySelectorAll(".cbo:not(.none)");if(hi>=0&&n2[hi])choose(items[+n2[hi].dataset.i]);else if(n2.length===1)choose(items[+n2[0].dataset.i]);else commitText();close();}}
+      else if(e.key==="Escape"){close();sync();}else if(e.key==="Tab"){commitText();close();}});
+    inp.addEventListener("blur",function(){setTimeout(function(){commitText();close();},120);});
+    list.addEventListener("mousedown",function(e){var o=e.target.closest(".cbo");if(!o||o.classList.contains("none"))return;e.preventDefault();choose(items[+o.dataset.i]);});
+    sel.addEventListener("cb:refresh",sync);sel.addEventListener("change",sync);}
+  document.querySelectorAll("select[data-combo]").forEach(initCombo);
+  /* provider switch: the model and effort lists are re-rendered from models.json (window.__MODELS), never from an inline string */
+  document.querySelectorAll("select[data-provider-switch]").forEach(function(ps){ps.addEventListener("change",function(){var p=ps.value==="codex"?"codex":"claude";var M=MODELS&&MODELS[p];if(!M)return;var form=ps.form;var ms=form.querySelector('select[data-role="model"]'),es=form.querySelector('select[data-role="effort"]');
+    if(ms){var keep=ms.value;ms.innerHTML='<option value="">Default</option>'+M.models.map(function(m){return '<option value="'+esc(m.id)+'">'+esc(m.name)+'</option>';}).join("");ms.value=M.models.some(function(m){return m.id===keep;})?keep:"";var f=form.querySelector('[name="model_free"]');if(f)f.value="";ms.dispatchEvent(new Event("cb:refresh"));}
+    if(es){var keepE=es.value;es.innerHTML='<option value="">Default</option>'+M.efforts.map(function(e){return '<option value="'+esc(e.id)+'">'+esc(e.name)+'</option>';}).join("");es.value=M.efforts.some(function(e){return e.id===keepE;})?keepE:"";es.dispatchEvent(new Event("cb:refresh"));}});});
+  /* Choose in Finder…: POST /pick-folder runs osascript's choose folder (async on the server); a cancelled dialog leaves the field as it was */
+  document.querySelectorAll("[data-pick-folder]").forEach(function(b){b.addEventListener("click",function(){var form=b.form,cwd=form.querySelector('[name="cwd"]'),sel=form.querySelector('select[data-role="folder"]');b.disabled=true;b.textContent="Choosing…";
+    fetch("/pick-folder",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({start:cwd?cwd.value:""})}).then(function(r){return r.json();}).then(function(j){if(j.path){if(cwd)cwd.value=j.path;if(sel){var o=document.createElement("option");o.value=j.path;o.textContent=j.path;sel.appendChild(o);sel.value=j.path;sel.dispatchEvent(new Event("cb:refresh"));}}else if(j.error)alert(j.error);}).catch(function(){alert("The home page did not answer.");}).then(function(){b.disabled=false;b.textContent="Choose in Finder…";});});});
+  /* popovers with many values get a type-to-filter box */
+  document.querySelectorAll(".pop").forEach(function(p){var links=p.querySelectorAll("a");if(links.length<9)return;var f=document.createElement("input");f.type="search";f.className="cbi";f.placeholder="Type to filter";f.style.margin="2px 4px 6px";p.insertBefore(f,p.firstChild);f.addEventListener("input",function(){var s=f.value.toLowerCase();links.forEach(function(a){a.style.display=!s||a.textContent.toLowerCase().indexOf(s)!==-1?"":"none";});});f.addEventListener("keydown",function(e){if(e.key==="Enter"){var v=[].filter.call(links,function(a){return a.style.display!=="none";});if(v.length===1)location.href=v[0].href;}});});
   /* drag and drop (PUT /api/layout): a plan (row or sidebar) onto a tag = tag it; a sidebar plan onto another plan of the same project = reorder; a project onto a project = reorder */
   var dragging=null;
   document.querySelectorAll("[data-drag]").forEach(function(el){el.addEventListener("dragstart",function(e){dragging=el.dataset.drag;e.dataTransfer.setData("text/plain",dragging);e.dataTransfer.effectAllowed="move";el.classList.add("drag");e.stopPropagation();});
@@ -529,7 +565,7 @@ const FONTS = `<link rel="preconnect" href="https://fonts.googleapis.com"><link 
 const page = (title, crumb, body, serverUp, { pills = "", sidebar = "", layout = null, view = "", key = "", wide = false } = {}) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title>${FONTS}<style>${CSS}</style><script>try{var t=localStorage.getItem("lavish-home:theme");if(t)document.documentElement.setAttribute("data-theme",t);if(localStorage.getItem("lavish-home:side-hidden")==="1"||localStorage.getItem("lavish-home:side-hidden")==='"1"')document.documentElement.classList.add("nos");}catch(e){}</script></head><body${view ? ` data-view="${esc(view)}"` : ""}${key ? ` data-key="${esc(key)}"` : ""}>
 <div class="top">${sidebar ? `<button class="tbtn" id="sideShow" type="button" title="Show the sidebar">☰</button>` : ""}<a class="logo" href="/">Lavish</a><span class="crumb">${esc(crumb)}</span><span class="sp"></span>${sidebar && view ? '<div class="search"><span aria-hidden="true">⌕</span><input id="q" type="search" placeholder="Search plans" autocomplete="off"></div>' : ""}${pills}<button class="tbtn" id="themeToggle" type="button" title="Light / dark (follows the system until you pick; saved in this browser)" aria-label="Toggle theme">◐</button><span class="pill lv-pill ${serverUp ? "on" : "off"}" title="The Lavish server on :${process.env.LAVISH_AXI_PORT || 4387}"><span class="ld"></span>lavish ${serverUp ? "up" : "down"}</span></div>
 ${sidebar ? `<div class="shell"><aside class="side">${sidebar}<div class="rzs" title="Drag to resize the sidebar"></div></aside><main>${body}</main></div>` : `<main style="${wide ? "padding:0" : "max-width:1280px;margin:0 auto"}">${body}</main>`}
-<script>window.__LAYOUT=${JSON.stringify(layout ? { tags: layout.tags } : { tags: {} }).replace(/<\//g, "<\\/")};window.__COLS=${JSON.stringify(COLUMNS.map((c) => ({ k: c.k, on: c.on })))};${CLIENT_JS}</script></body></html>`;
+<script>window.__LAYOUT=${JSON.stringify(layout ? { tags: layout.tags } : { tags: {} }).replace(/<\//g, "<\\/")};window.__MODELS=${JSON.stringify(modelsForClient()).replace(/<\//g, "<\\/")};window.__COLS=${JSON.stringify(COLUMNS.map((c) => ({ k: c.k, on: c.on })))};${CLIENT_JS}</script></body></html>`;
 const errorPage = (title, message, { back = "/", extra = "" } = {}, serverUp = true) => page(title, title, `<div class="errpage"><h1>${esc(title)}</h1><p>${esc(message)}</p>${extra}<p class="meta"><a class="a" href="${esc(back)}">← Back</a></p></div>`, serverUp);
 
 function planChip(plan) {
@@ -710,21 +746,33 @@ function row(s, back = "", layout, { i = 0, hide = false } = {}) {
 function shortPath(p) { return p.replace(os.homedir(), "~").replace("/Library/CloudStorage/Dropbox-Personal/Development/", "/…/"); }
 
 /* ── launch forms + agent block (plan page) ──────────────────────────────── */
-const opts = (list, sel) => list.map((x) => `<option value="${esc(x)}"${x === (sel || "default") ? " selected" : ""}>${esc(x)}</option>`).join("");
+/** Recent folders for the New-session combobox: the plan's own first, then the terminals this page started and the agents' cwds. */
+function recentFolders(s) {
+  const out = []; const push = (p) => { if (p && existsSync(p) && !out.includes(p)) out.push(p); };
+  push(projectCwd(s));
+  for (const t of readTerminals()) push(t.cwd);
+  for (const x of [s.reg.agent, ...s.agents]) if (x) push(x.cwd);
+  return out.slice(0, 8);
+}
+const knownModel = (provider, id) => readModels()[provider === "codex" ? "codex" : "claude"].models.some((m) => m.id === id);
+const modelOpts = (provider, sel) => { const M = readModels()[provider === "codex" ? "codex" : "claude"]; return `<option value=""${!sel ? " selected" : ""}>Default</option>${M.models.map((m) => `<option value="${esc(m.id)}"${m.id === sel ? " selected" : ""}>${esc(m.name)}</option>`).join("")}`; };
+const effortOpts = (provider, sel) => { const M = readModels()[provider === "codex" ? "codex" : "claude"]; return `<option value=""${!sel || sel === "default" ? " selected" : ""}>Default</option>${M.efforts.map((e) => `<option value="${esc(e)}"${e === sel ? " selected" : ""}>${esc(effortName(e))}</option>`).join("")}`; };
 function launchForms(s, { cwd = "" } = {}) {
   const l = s.reg.launch || {};
   const a = s.agent;
   const provider = l.provider || a.provider || "claude";
+  const freeModel = l.model && l.model !== "default" && !knownModel(provider, l.model) ? l.model : "";
   const resumeForm = a.state === "none" ? `<p class="meta" style="margin:0 0 4px">No agent has polled this plan yet, so there is nothing to resume. Start a new session below, or run <span class="mono">lavish-poll</span> from the session that is on it.</p>` :
     `<form class="xform" method="post" action="/connect/${s.key}"><div class="row"><button class="b" type="submit">${a.state === "active" ? (a.terminal ? "Bring the terminal forward" : "Open in Lavish") : "Resume"}</button> ${glyph(a.provider)} <span class="mono">${esc(a.name)}</span>
-    <label>Model <select name="model">${a.provider === "codex" ? `<option value="">default</option>` : opts(LAUNCH_OPTIONS.claude.models, l.model)}</select></label>${a.provider === "codex" ? `<label>or <input type="text" name="model_free" value="${esc(l.model && !LAUNCH_OPTIONS.codex.models.includes(l.model) ? l.model : "")}" placeholder="codex model (free text)" style="width:160px"></label>` : ""}<label>Effort <select name="effort">${opts(LAUNCH_OPTIONS[a.provider === "codex" ? "codex" : "claude"].efforts, l.effort)}</select></label></div>
+    <label>Model <select name="model" data-combo data-free="model_free" data-role="model">${modelOpts(a.provider, knownModel(a.provider, l.model) ? l.model : "")}</select><input type="hidden" name="model_free" value="${esc(a.provider === provider ? freeModel : "")}"></label><label>Effort <select name="effort" data-combo data-role="effort">${effortOpts(a.provider, l.effort)}</select></label></div>
     <p class="meta" style="margin:0">${a.state === "active" ? (a.terminal ? `Already running in tmux ${esc(a.tmuxName)}: nothing new is started. Model and effort apply at the next resume.` : `Live in ${esc(a.entrypointLabel)}: nothing is spawned (a second writer would corrupt its transcript); the plan opens in Lavish.`) : `Ended ${esc(ago(a.lastAt || a.at))}. Starts <span class="mono">tmux new-session -s ${esc(a.tmuxName)}</span> in <span class="mono">${esc(shortPath(a.cwd || ""))}</span> running <span class="mono">${a.provider === "codex" ? "codex resume" : "claude --resume"} ${esc(String(a.id).slice(0, 8))}…</span>, opens Terminal.app on it, then the plan in Lavish. Remembered per plan.`}</p></form>
-    <form class="xform" method="post" action="/restart/${s.key}" onsubmit="return confirm('Restart: end the Lavish session, close its tabs, and start a NEW ${esc(provider)} session on this plan?')"><div class="row"><button class="b q" type="submit"${a.state === "active" ? " disabled" : ""}>Restart</button><span class="meta">${a.state === "active" ? `refused while ${esc(a.name)} is live in ${a.terminal ? "terminal " + esc(a.tmuxName) : esc(a.entrypointLabel)}: end it there first (a second agent on one plan would fight the first)` : `ends the Lavish session and its tabs, then starts a fresh ${esc(provider === "codex" ? "Codex" : "Claude")} session (${esc(modelName(l.model) || "default model")}, ${esc(l.effort || "default effort")}) whose first prompt reopens this plan; the old session is never resumed`}</span></div></form>`;
-  const newForm = `<form class="xform" method="post" action="/connect/${s.key}?new=1"><div class="row"><b>New</b> <label>Provider <select name="provider" onchange="this.form.querySelector('[name=model]').innerHTML=this.value==='codex'?'<option value=\\'\\'>default</option>':'${LAUNCH_OPTIONS.claude.models.map((m) => `<option value=${m}>${m}</option>`).join("")}';this.form.querySelector('[name=effort]').innerHTML=(this.value==='codex'?${JSON.stringify(LAUNCH_OPTIONS.codex.efforts)}:${JSON.stringify(LAUNCH_OPTIONS.claude.efforts)}).map(function(e){return '<option value='+e+'>'+e+'</option>'}).join('')"><option value="claude"${provider !== "codex" ? " selected" : ""}>Claude</option><option value="codex"${provider === "codex" ? " selected" : ""}>Codex</option></select></label>
-    <label>Model <select name="model">${provider === "codex" ? `<option value="">default</option>` : opts(LAUNCH_OPTIONS.claude.models, l.model)}</select></label><label>or <input type="text" name="model_free" placeholder="codex model (free text)" style="width:150px"></label><label>Effort <select name="effort">${opts(LAUNCH_OPTIONS[provider === "codex" ? "codex" : "claude"].efforts, l.effort)}</select></label></div>
-    <div class="row"><label style="flex:1">Folder <input type="text" name="cwd" value="${esc(cwd || projectCwd(s))}" style="flex:1"></label></div>
+    <form class="xform" method="post" action="/restart/${s.key}" onsubmit="return confirm('Restart: end the Lavish session, close its tabs, and start a NEW ${esc(provider)} session on this plan?')"><div class="row"><button class="b q" type="submit"${a.state === "active" ? " disabled" : ""}>Restart</button><span class="meta">${a.state === "active" ? `refused while ${esc(a.name)} is live in ${a.terminal ? "terminal " + esc(a.tmuxName) : esc(a.entrypointLabel)}: end it there first (a second agent on one plan would fight the first)` : `ends the Lavish session and its tabs, then starts a fresh ${esc(provider === "codex" ? "Codex" : "Claude")} session (${esc(modelName(l.model) || "default model")}, ${esc(effortName(l.effort))} effort) whose first prompt reopens this plan; the old session is never resumed`}</span></div></form>`;
+  const folders = recentFolders(s); const start = cwd || projectCwd(s);
+  const newForm = `<form class="xform" method="post" action="/connect/${s.key}?new=1" data-launch><div class="row"><b>New</b> <label>Provider <select name="provider" data-combo data-provider-switch><option value="claude"${provider !== "codex" ? " selected" : ""}>Claude</option><option value="codex"${provider === "codex" ? " selected" : ""}>Codex</option></select></label>
+    <label>Model <select name="model" data-combo data-free="model_free" data-role="model">${modelOpts(provider, knownModel(provider, l.model) ? l.model : "")}</select><input type="hidden" name="model_free" value="${esc(freeModel)}"></label><label>Effort <select name="effort" data-combo data-role="effort">${effortOpts(provider, l.effort)}</select></label></div>
+    <div class="row"><label style="flex:1;display:flex">Folder <select name="cwd_pick" data-combo data-free="cwd" data-role="folder" style="flex:1">${[start, ...folders.filter((f) => f !== start)].map((f) => `<option value="${esc(f)}"${f === start ? " selected" : ""}>${esc(shortPath(f))}</option>`).join("")}</select><input type="hidden" name="cwd" value="${esc(start)}"></label><button class="b q" type="button" data-pick-folder title="Opens the Finder's folder dialog on this Mac (osascript); cancelling leaves the field as it was">Choose in Finder…</button></div>
     <label style="display:block">Prompt<textarea name="prompt">${esc(l.prompt || defaultNewPrompt(s.resolved || s.file))}</textarea></label>
-    <div class="row"><button class="b" type="submit">Start in a terminal</button><span class="meta">Claude: <span class="mono">claude --session-id &lt;new uuid&gt; …</span> (stamped on the plan at once). Codex: <span class="mono">codex -C &lt;folder&gt; …</span> (its thread is matched by folder on the first poll).</span></div></form>`;
+    <div class="row"><button class="b" type="submit">Start in a terminal</button><span class="meta">Claude: <span class="mono">claude --session-id &lt;new uuid&gt; …</span> (stamped on the plan at once). Codex: <span class="mono">codex -C &lt;folder&gt; …</span> (its thread is matched by folder on the first poll). Model and effort lists come from <span class="mono">~/.lavish-axi/models.json</span>; type any id for a model that is not listed.</span></div></form>`;
   return resumeForm + newForm;
 }
 /** The Agent block: state, session (name · provider · model), folder, stamped; Change effort for owned Claude terminals. */
@@ -735,7 +783,7 @@ function agentBlock(s, { effortResult = "", scanResult = "" } = {}) {
   return `<div class="kv"><span class="k">State</span><span>${a.state === "none" ? '<span class="ag none">not connected</span>' : `<span class="ag ${a.state}${a.source === "scan" ? " scan" : ""}">${a.state === "active" ? '<span class="dot"></span>' : ""}${esc(a.state)}${a.state === "active" ? ` · ${a.terminal ? "terminal " + esc(a.tmuxName) : esc(a.entrypointLabel)}${a.status ? ` · ${esc(a.status)}` : ""}` : ` · ${esc(ago(a.lastAt || a.at))}`}${s.tabs ? ` · ${s.tabs} tab${s.tabs === 1 ? "" : "s"} open` : ""}</span>`}</span>
   ${a.state !== "none" ? `<span class="k">Session</span><span>${glyph(a.provider)} <span class="mono" title="${esc(a.id)}">${esc(a.name)}</span> · ${esc(a.provider === "codex" ? "Codex" : "Claude")}${model ? ` · ${esc(model)}` : ""}${a.model ? "" : model ? ' <span class="meta" title="the transcript was not found; this is the launch choice remembered for the plan">(remembered)</span>' : ""}${a.guessed ? " · guessed (several live Codex threads in this folder)" : ""}</span><span class="k">Folder</span><span class="mono">${esc(shortPath(a.cwd || ""))}${a.cwd && !existsSync(a.cwd) ? ' <span class="st orphan">missing</span>' : ""}</span><span class="k">Started</span><span>${a.startedAt ? fmt(a.startedAt) : "–"} · stamped by ${esc(a.source)} ${fmt(a.at)}${a.state === "ended" ? ` · would resume as <span class="mono">${esc(a.tmuxName)}</span>` : ""}</span>` : ""}</div>
   ${effortResult ? `<div class="notice">${esc(effortResult)}</div>` : ""}${scanResult ? `<div class="notice">${esc(scanResult)}</div>` : ""}
-  ${owned ? `<form class="inline" method="post" action="/effort/${s.key}" style="display:block;margin:0 0 10px"><label>Change effort <select name="level">${LAUNCH_OPTIONS.claude.efforts.filter((e) => e !== "default").map((e) => `<option value="${e}">${e}</option>`).join("")}</select></label> <button class="b q" type="submit" title="Types /effort <level> into the terminal ${esc(a.tmuxName)}, only while it is idle at its prompt, then shows the pane's reply">Type /effort into the terminal</button></form>` : ""}`;
+  ${owned ? `<form class="inline" method="post" action="/effort/${s.key}" style="display:block;margin:0 0 10px"><label>Change effort <select name="level" data-combo>${readModels().claude.efforts.map((e) => `<option value="${esc(e)}">${esc(effortName(e))}</option>`).join("")}</select></label> <button class="b q" type="submit" title="Types /effort <level> into the terminal ${esc(a.tmuxName)}, only while it is idle at its prompt, then shows the pane's reply">Type /effort into the terminal</button></form>` : ""}`;
 }
 const ENTRYPOINT_WORD = { "claude-vscode": "VS Code", "claude-cursor": "Cursor", "claude-desktop": "Desktop", cli: "terminal", codex: "Codex" };
 /** Sessions table: every agent that has been on this plan (the current one first). */
@@ -1158,6 +1206,20 @@ function readRawBody(req, max) { return new Promise((ok, fail) => { const chunks
 function parseBody(raw, type = "") { if (/json/i.test(type)) { try { return JSON.parse(raw || "{}"); } catch { return {}; } } return Object.fromEntries(new URLSearchParams(raw)); }
 async function lavishUp() { try { const r = await fetch(`${lavishBase}/health`); return r.ok; } catch { return false; } }
 const safeBack = (b, fallback) => (b && b.startsWith("/") && !b.startsWith("//") ? b : fallback);
+/** The Finder's folder dialog through osascript, spawned async (a dialog left open holds one request, not the server) with a 5-minute cap. */
+function pickFolder(start = "") {
+  const script = `POSIX path of (choose folder with prompt "Folder for the new session"${start && existsSync(start) ? ` default location POSIX file ${JSON.stringify(start)}` : ""})`;
+  return new Promise((resolve) => {
+    let out = "", err = "", done = false, timer = null;
+    const finish = (v) => { if (done) return; done = true; if (timer) clearTimeout(timer); resolve(v); };
+    let child;
+    try { child = spawn("/usr/bin/osascript", ["-e", script], { stdio: ["ignore", "pipe", "pipe"] }); } catch (e) { return finish({ error: String(e.message || e) }); }
+    timer = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} finish({ cancelled: true, error: "The Finder dialog was left open for 5 minutes and was closed." }); }, 5 * 60_000);
+    child.stdout.on("data", (d) => { out += d; }); child.stderr.on("data", (d) => { err += d; });
+    child.on("error", (e) => finish({ error: String(e.message || e) }));
+    child.on("close", (code, signal) => { const p = out.trim().replace(/\/$/, ""); if (code === 0 && p) return finish({ path: p }); if (code === null || /cancel/i.test(err) || /-128/.test(err)) return finish({ cancelled: true, ...(signal ? { signal } : {}) }); finish({ error: err.trim().slice(0, 300) || `osascript exited ${code}` }); });
+  });
+}
 /** Resume the plan's Lavish session headlessly (as /open does) and return its URL, or an error. */
 function openLavish(s) {
   const r = spawnSync("lavish-axi", [s.resolved, "--no-open", ...(s.endedBy === "user" ? ["--reopen"] : [])], { encoding: "utf8", env: localBinEnv(), timeout: 60000 });
@@ -1186,7 +1248,7 @@ const okLevel = (v, list) => (list.includes(String(v || "")) ? String(v) : "");
 async function launchAction(s, { isNew, body, wanted = "" }, serverUp) {
   const provider = isNew ? (body.provider === "codex" ? "codex" : "claude") : (s.agent.provider || "claude");
   const model = String(body.model_free || body.model || "").trim();
-  const effort = okLevel(body.effort, LAUNCH_OPTIONS[provider].efforts);
+  const effort = okLevel(body.effort, launchOptions()[provider].efforts);
   const remember = { provider, model, effort, ...(isNew && body.prompt ? { prompt: String(body.prompt).slice(0, 4000) } : {}) };
   try { updateRegistry(s.key, { file: s.resolved, launch: remember }); } catch {}
   const back = `/session/${s.key}`;
@@ -1316,6 +1378,10 @@ http.createServer(async (req, res) => {
       }
       return json(res, 405, { error: "GET or PUT" });
     }
+    if (req.method === "POST" && path === "/pick-folder") {
+      const b = parseBody(await readBody(req), req.headers["content-type"]);
+      return json(res, 200, await pickFolder(String(b.start || "")));
+    }
     if ((m = /^\/api\/presence\/([0-9a-f]{16})$/.exec(path))) {
       if (req.method === "GET") return json(res, 200, { tabs: presenceTabs(m[1]).filter((t) => !t.close).map((t) => ({ tab: t.tab, at: new Date(t.at).toISOString(), title: t.title })) });
       if (req.method !== "PUT" && req.method !== "POST") return json(res, 405, { error: "GET, PUT or POST" });
@@ -1373,10 +1439,10 @@ http.createServer(async (req, res) => {
     if (req.method === "POST" && (m = /^\/effort\/([0-9a-f]{16})$/.exec(path))) {
       const s = sessions.find((x) => x.key === m[1]); if (!s) return send(res, 404, "text/plain", "no such session");
       const body = parseBody(await readBody(req), req.headers["content-type"]);
-      const level = okLevel(body.level, LAUNCH_OPTIONS.claude.efforts.filter((e) => e !== "default"));
+      const level = okLevel(body.level, readModels().claude.efforts);
       const a = s.agent; const back = `/session/${s.key}`;
       const say = (t) => redirect(res, `${back}?effort=${encodeURIComponent(t)}#agent`);
-      if (!level) return say("Pick an effort level (low, medium, high, xhigh, max).");
+      if (!level) return say(`Pick an effort level (${readModels().claude.efforts.join(", ")}).`);
       if (!(a.state === "active" && a.terminal && a.provider === "claude")) return say("Change effort needs a live Claude session in a terminal this page or Manager Marcus started; this plan's agent is not one.");
       const pane = await capturePane(a.tmuxName, 12);
       if (pane == null) return say(`Terminal ${a.tmuxName} is gone.`);

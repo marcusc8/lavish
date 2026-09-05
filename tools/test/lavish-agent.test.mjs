@@ -1,7 +1,7 @@
 // node --test ~/.claude/skills/lavish/tools/test/*.test.mjs — fake runners only: no tmux, no osascript, no CLI is spawned.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, realpathSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, realpathSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import os from "node:os";
 
@@ -233,4 +233,33 @@ test("sessionInfoOf: Claude model from the last assistant line (tail), first/las
   const c = A.sessionInfoOf({ provider: "codex", id: tid }, { codex: { home: ch, now: Date.parse("2026-09-06T00:00:00Z") } });
   assert.equal(c.model, "gpt-6-astra"); assert.equal(c.startedAt, "2026-09-05T22:46:54.190Z"); assert.equal(c.file, rf);
   assert.equal(A.codexRolloutPath("nope-id-0000", { home: ch }), "");
+});
+
+test("models.json: seeded on first read, edits picked up by mtime, names for ids and full ids, launchOptions shape, free-text ids kept", () => {
+  const mp = join(tmp, "models.json");
+  const m = A.readModels(mp);
+  assert.ok(existsSync(mp), "seeded on first read");
+  assert.deepEqual(m.claude.models.map((x) => x.name), ["Fable 5.1", "Opus 5", "Sonnet 5", "Haiku 4.5"]);
+  assert.deepEqual(m.codex.models.map((x) => x.id), ["gpt-6-astra", "gpt-6-sol", "gpt-6-terra", "gpt-6-luna"]);
+  assert.equal(A.modelName("claude-fable-5-1", m), "Fable 5.1"); assert.equal(A.modelName("fable", m), "Fable 5.1"); assert.equal(A.modelName("GPT-6-ASTRA", m), "GPT-6 Astra");
+  assert.equal(A.modelName("claude-mystery-5-6", m), "claude-mystery-5-6", "an unknown id is shown as itself, never hidden"); assert.equal(A.modelName("default", m), "");
+  assert.equal(A.effortName("xhigh"), "XHigh"); assert.equal(A.effortName("high"), "High"); assert.equal(A.effortName(""), "Default");
+  const lo = A.launchOptions(m);
+  assert.deepEqual(lo.claude.models, ["default", "fable", "opus", "sonnet", "haiku"]); assert.deepEqual(lo.codex.efforts, ["default", "low", "medium", "high", "xhigh"]);
+  // Marcus adds a 5.6 line: the next read (new mtime) knows it; a malformed entry is dropped, an empty list falls back to the defaults
+  writeFileSync(mp, JSON.stringify({ claude: { models: [{ id: "fable56", name: "Fable 5.6", full: "claude-fable-5-6" }, { name: "no id" }], efforts: [] }, codex: { models: [], efforts: ["low", "Bad Value"] } }));
+  utimesSync(mp, new Date(Date.now() + 5000), new Date(Date.now() + 5000));
+  const m2 = A.readModels(mp);
+  assert.deepEqual(m2.claude.models, [{ id: "fable56", name: "Fable 5.6", full: "claude-fable-5-6" }]);
+  assert.equal(A.modelName("claude-fable-5-6", m2), "Fable 5.6");
+  assert.deepEqual(m2.claude.efforts, ["low", "medium", "high", "xhigh", "max"], "empty efforts fall back");
+  assert.deepEqual(m2.codex.models.map((x) => x.id), ["gpt-6-astra", "gpt-6-sol", "gpt-6-terra", "gpt-6-luna"], "empty models fall back");
+  assert.deepEqual(m2.codex.efforts, ["low"], "a bad effort word is dropped");
+  // argv builders keep free-text ids for both providers (D7), and still drop default / junk
+  assert.deepEqual(A.claudeNewArgv("/c", { sessionId: "u", model: "claude-fable-5-6", effort: "high", prompt: "p" }), ["/c", "--session-id", "u", "--model", "claude-fable-5-6", "--effort", "high", "--", "p"]);
+  assert.deepEqual(A.claudeResumeArgv("/c", "id", { model: "not a model!" }), ["/c", "--resume", "id"]);
+  // the effort gate follows the file too: "low" is the only codex effort left in it, so xhigh is dropped and low is kept
+  assert.deepEqual(A.codexNewArgv("/x", { cwd: "/p", model: "gpt-6-luna", effort: "xhigh", prompt: "hi" }), ["/x", "-C", "/p", "-m", "gpt-6-luna", "hi"]);
+  assert.deepEqual(A.codexNewArgv("/x", { cwd: "/p", model: "gpt-6-luna", effort: "low", prompt: "hi" }), ["/x", "-C", "/p", "-m", "gpt-6-luna", "-c", 'model_reasoning_effort="low"', "hi"]);
+  writeFileSync(mp, JSON.stringify(A.DEFAULT_MODELS)); utimesSync(mp, new Date(Date.now() + 9000), new Date(Date.now() + 9000)); // back to the defaults for the tests that follow
 });
