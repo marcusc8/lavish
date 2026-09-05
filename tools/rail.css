@@ -1,0 +1,167 @@
+/* lavish-local-patch:review-rail */
+/* Comments rail + light theme — appended to lavish-axi's dist/chrome.css by patch-lavish.mjs. */
+
+/* ── Theme: the Instagram palette instead of black + brass. Tokens only, so every stock rule follows. ── */
+:root {
+  --ig-blue: #0095f6; --ig-blue-hover: #1877f2; --ig-link: #00376b; --ig-red: #ed4956; --ig-green: #2f9e44;
+  --bg: #fafafa; --bg-panel: #ffffff; --bg-bar: #ffffff; --bg-elevated: #f2f2f2;
+  --fg: #262626; --fg-muted: #363636; --fg-dim: #555555; --fg-faint: #737373; --fg-label: #8e8e8e;
+  --border: #dbdbdb; --border-subtle: #efefef; --border-strong: #c7c7c7;
+  --accent: var(--ig-blue); --accent-hover: var(--ig-blue-hover); --accent-ink: #ffffff; --danger: var(--ig-red);
+  --shadow-tooltip: 0 8px 28px rgba(0, 0, 0, 0.14); --shadow-floating: 0 12px 40px rgba(0, 0, 0, 0.16);
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, "Helvetica Neue", sans-serif;
+  /* Raw palette tokens a few stock rules use directly (menu hover, drawer surfaces): re-mapped to light values. */
+  --steel-700: #efefef; --steel-600: #e2e2e2; --steel-500: #d0d0d0; --ink-800: #ffffff; --ink-700: #ffffff; --ink-600: #f2f2f2; --brass-400: var(--ig-blue-hover);
+  --lavish-rail-w: 300px;
+}
+.menu-item:hover:not(:disabled), .menu-file:hover { background: var(--bg-elevated); color: var(--fg); }
+body.lavish { color-scheme: light; }
+.bar { box-shadow: 0 1px 0 var(--border-subtle); }
+.brand-mark { color: var(--fg); font-family: var(--font-sans); font-style: normal; font-weight: 800; font-size: 19px; letter-spacing: -0.03em; }
+.brand-support { color: var(--fg-faint); font-family: var(--font-sans); font-weight: 500; font-size: 12px; letter-spacing: .02em; text-transform: none; }
+.warnings-button { border-color: var(--border); background: var(--bg-elevated); color: var(--fg-dim); }
+.warnings-button[aria-expanded="true"] { border-color: var(--accent); background: #e7f3ff; }
+.bubble.user { background: var(--ig-blue); border-color: var(--ig-blue); color: #fff; }
+.bubble.user.lavish-local-annotation { background: #e7f3ff; border-color: #cfe4fb; color: var(--fg); border-style: solid; }
+.bubble.user small { color: rgba(255, 255, 255, 0.85); }
+.bubble.user.lavish-local-annotation small { color: var(--fg-faint); }
+.bubble.agent { background: var(--bg-elevated); border-color: var(--bg-elevated); }
+.pill { background: #fff; }
+.button { box-shadow: none; }
+.menu { box-shadow: var(--shadow-floating); }
+
+/* ── Layout: rail column + hideable chat ── */
+.lavish-rail { display: none; grid-column: 2; min-width: 0; min-height: 0; border-left: var(--hairline-subtle); background: var(--bg-panel); flex-direction: column; overflow: hidden; }
+body.lavish-rail-open .layout { grid-template-columns: minmax(0, 1fr) var(--lavish-rail-w) var(--panel-w); }
+body.lavish-rail-open .frame { grid-column: 1; }
+body.lavish-rail-open .lavish-rail { display: flex; }
+body.lavish-rail-open .panel { grid-column: 3; }
+body.lavish-chat-hidden .layout { grid-template-columns: minmax(0, 1fr) 0px; }
+body.lavish-chat-hidden.lavish-rail-open .layout { grid-template-columns: minmax(0, 1fr) var(--lavish-rail-w) 0px; }
+body.lavish-chat-hidden .panel { display: none; }
+@media (max-width: 1100px) { :root { --lavish-rail-w: 260px; } }
+@media (max-width: 860px) {
+  body.lavish-rail-open .layout, body.lavish-chat-hidden .layout { grid-template-columns: minmax(0, 1fr); }
+  .lavish-rail { display: none !important; }
+  body.lavish-chat-hidden .panel { display: flex; }
+}
+
+/* ── Top-bar controls ── */
+.lavish-bar-link { color: var(--fg-dim); text-decoration: none; font-size: 12.5px; padding: 5px 11px; border: 1px solid var(--border); border-radius: var(--radius-pill); white-space: nowrap; background: #fff; }
+.lavish-bar-link:hover { color: var(--fg); border-color: var(--border-strong); }
+.lavish-bar-link.is-off { opacity: .5; }
+.lavish-bar-btn { display: inline-flex; align-items: center; gap: 6px; background: #fff; color: var(--fg-dim); font: inherit; font-size: 12.5px; padding: 5px 11px; border: 1px solid var(--border); border-radius: var(--radius-pill); cursor: pointer; white-space: nowrap; }
+.lavish-bar-btn:hover { color: var(--fg); border-color: var(--border-strong); }
+.lavish-bar-btn[aria-pressed="true"] { border-color: var(--fg); color: var(--fg); }
+.lavish-bar-btn b { font-weight: var(--w-semi); min-width: 16px; padding: 0 5px; border-radius: 999px; background: var(--bg-elevated); color: var(--fg-dim); font-size: 11px; line-height: 16px; text-align: center; }
+.lavish-bar-btn.has b { background: var(--accent); color: var(--accent-ink); }
+.lavish-seg { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-pill); background: #fff; padding: 2px; }
+.lavish-seg button { border: 0; background: transparent; color: var(--fg-dim); font: inherit; font-size: 12.5px; padding: 3px 11px; border-radius: var(--radius-pill); cursor: pointer; }
+.lavish-seg button[aria-pressed="true"] { background: var(--fg); color: #fff; }
+.lavish-seg button[data-mode="private"][aria-pressed="true"] { background: #8e8e8e; }
+.lavish-seg button b { font-weight: var(--w-semi); min-width: 16px; padding: 0 5px; border-radius: 999px; background: var(--bg-elevated); color: var(--fg-dim); font-size: 11px; line-height: 16px; display: inline-block; text-align: center; margin-left: 2px; }
+.lavish-seg button[aria-pressed="true"] b { background: rgba(255, 255, 255, .25); color: #fff; }
+.lavish-rail-filters { display: flex; gap: 4px; padding: 8px 12px 6px; border-bottom: var(--hairline-subtle); }
+.lavish-rail-filters button { border: 1px solid transparent; background: transparent; color: var(--fg-faint); font: inherit; font-size: 11.5px; padding: 2px 8px; border-radius: var(--radius-pill); cursor: pointer; }
+.lavish-rail-filters button:hover { color: var(--fg); background: var(--bg-elevated); }
+.lavish-rail-filters button[aria-pressed="true"] { background: var(--bg-elevated); color: var(--fg); border-color: var(--border); }
+.lavish-rail-filters button b { font-weight: var(--w-semi); margin-left: 2px; color: var(--fg-faint); }
+.lavish-rail-sync.is-busy { background: var(--accent); animation: lavish-busy 1s ease-in-out infinite alternate; }
+@keyframes lavish-busy { from { opacity: .35; } to { opacity: 1; } }
+.lavish-card-files { display: flex; flex-wrap: wrap; gap: 6px; }
+.lavish-card-thumb { position: relative; display: block; width: 56px; height: 56px; border-radius: 6px; overflow: hidden; border: 1px solid var(--border-subtle); background: var(--bg-elevated); }
+.lavish-card-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.lavish-card-thumb.is-gone { display: none; }
+.lavish-thumb-x { position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; border-radius: 999px; border: 0; background: rgba(0, 0, 0, .6); color: #fff; font-size: 13px; line-height: 18px; padding: 0; cursor: pointer; }
+.lavish-card-actions button[data-act="attach"] { color: var(--fg-dim); }
+@media (max-width: 860px) { .lavish-bar-btn, .lavish-bar-link, .lavish-seg, .lavish-stage-wrap, .lavish-version-wrap { display: none; } }
+.lavish-version-wrap { position: relative; display: inline-flex; }
+.lavish-version { font-variant-numeric: tabular-nums; }
+.lavish-version-round { font-weight: 400; color: var(--fg-faint); font-size: 11.5px; }
+.lavish-version-menu { position: absolute; top: calc(100% + 8px); left: 0; z-index: 30; width: 360px; max-height: 70vh; overflow-y: auto; padding: 6px; }
+.lavish-version-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 7px 8px; border-radius: var(--radius-sm); font-size: 12.5px; }
+.lavish-version-row.is-current { background: #e7f3ff; }
+.lavish-version-main { min-width: 0; }
+.lavish-version-when { color: var(--fg-faint); font-size: 11.5px; margin-left: 4px; }
+.lavish-version-here { color: var(--accent); font-size: 11px; font-weight: var(--w-semi); margin-left: 4px; }
+.lavish-version-why { color: var(--fg-dim); font-size: 11.5px; margin-top: 1px; }
+.lavish-version-why .up { color: var(--ig-green); } .lavish-version-why .down { color: var(--danger); }
+.lavish-version-acts { display: flex; gap: 8px; flex: 0 0 auto; padding-top: 2px; }
+.lavish-version-acts a { color: var(--accent); text-decoration: none; font-size: 11.5px; white-space: nowrap; }
+.lavish-version-acts a:hover { text-decoration: underline; }
+.lavish-rail-notice { display: flex; align-items: center; gap: 8px; margin: 8px 12px 0; padding: 7px 10px; border-radius: var(--radius-md); background: #e7f3ff; color: var(--fg); font-size: 12px; line-height: 1.4; border: 1px solid #cfe4fb; }
+.lavish-rail-notice[hidden] { display: none; }
+.lavish-rail-notice.is-warn { background: #fff8e5; border-color: #f1e2a8; color: #6b5a1e; }
+.lavish-rail-notice > span:first-child { flex: 1 1 auto; }
+.lavish-rail-notice-acts { display: flex; gap: 4px; }
+.lavish-rail-notice-acts button { border: 1px solid var(--border); background: #fff; color: var(--fg-dim); font: inherit; font-size: 11.5px; padding: 2px 8px; border-radius: var(--radius-pill); cursor: pointer; }
+.lavish-rail-notice [data-act="dismiss"] { border: 0; background: none; color: var(--fg-faint); font-size: 15px; line-height: 1; padding: 0 4px; cursor: pointer; }
+.lavish-stage-wrap { position: relative; display: inline-flex; }
+.lavish-stage[data-stage="planning"] { border-color: #bcd7f2; color: #1f4e79; }
+.lavish-stage[data-stage="developing"] { border-color: #e2d3a6; color: #8a6d1f; }
+.lavish-stage[data-stage="review"] { border-color: #cfc4ea; color: #4b3a8a; }
+.lavish-stage[data-stage="done"] { border-color: #bfe0c6; color: #2f7d4f; }
+.lavish-stage[data-stage="parked"] { color: var(--fg-faint); }
+.lavish-stage.is-inferred { border-style: dashed; }
+.lavish-stage-menu { position: absolute; top: calc(100% + 8px); left: 0; z-index: 30; width: 380px; max-height: 70vh; overflow-y: auto; padding: 6px; }
+.lavish-stage-steps { display: flex; gap: 4px; padding: 6px 8px 8px; }
+.lavish-stage-steps span { flex: 1; text-align: center; font-size: 11.5px; padding: 5px 4px; border-radius: 6px; background: var(--bg-elevated); color: var(--fg-faint); }
+.lavish-stage-steps span.is-past { background: #e7f3ff; color: var(--accent); }
+.lavish-stage-steps span.is-now { background: var(--accent); color: #fff; font-weight: var(--w-semi); }
+.lavish-stage-steps.is-parked span { opacity: .5; }
+.lavish-stage-meta { padding: 3px 8px; font-size: 12px; color: var(--fg-dim); }
+.lavish-stage-row { padding: 6px 8px; font-size: 12px; border-top: 1px solid var(--border-subtle); }
+.lavish-stage-sess { font-size: 11px; color: var(--fg-faint); margin-left: 6px; }
+.lavish-verdict { margin-right: auto; font: inherit; font-size: 12.5px; color: var(--fg-dim); background: #fff; border: 1px solid var(--border); border-radius: var(--radius-pill); padding: 5px 9px; max-width: 46%; }
+
+/* ── Rail ── */
+.lavish-rail-head { display: flex; align-items: center; gap: 8px; padding: 0 12px 0 16px; min-height: 46px; border-bottom: var(--hairline-subtle); }
+.lavish-rail-head h2 { font-size: 15px; line-height: 1.3; margin: 0; font-weight: var(--w-semi); letter-spacing: 0; flex: 1 1 auto; }
+.lavish-rail-sync { width: 7px; height: 7px; border-radius: 999px; background: var(--border-strong); flex: 0 0 auto; }
+.lavish-rail-sync.is-on { background: var(--ig-green); }
+.lavish-rail-sync.is-off { background: var(--danger); }
+.lavish-rail-mini { border: 1px solid var(--border); background: #fff; color: var(--fg-dim); font: inherit; font-size: 11.5px; padding: 3px 8px; border-radius: var(--radius-pill); cursor: pointer; white-space: nowrap; }
+.lavish-rail-mini:hover { color: var(--fg); border-color: var(--border-strong); }
+.lavish-rail-x { font-size: 15px; line-height: 1; padding: 1px 7px 3px; }
+.lavish-rail-legacy { margin: 10px 12px 0; padding: 8px 10px; border-radius: var(--radius-md); background: #fff8e5; color: #6b5a1e; font-size: 11.5px; line-height: 1.45; border: 1px solid #f1e2a8; }
+.lavish-rail-legacy code { font-family: var(--font-mono); font-size: 11px; color: var(--fg); }
+.lavish-rail-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 10px 12px 16px; display: flex; flex-direction: column; gap: 8px; background: var(--bg); }
+.lavish-rail-empty { color: var(--fg-faint); font-size: 12.5px; line-height: 1.5; padding: 10px 4px; }
+.lavish-rail-empty b { color: var(--fg-dim); font-weight: var(--w-semi); }
+.lavish-rail-group { border-top: var(--hairline-subtle); padding-top: 6px; margin-top: 4px; }
+.lavish-rail-group summary { cursor: pointer; color: var(--fg-faint); font-size: 12px; padding: 4px 2px 8px; list-style: none; }
+.lavish-rail-group summary::-webkit-details-marker { display: none; }
+.lavish-rail-group summary span { color: var(--fg-faint); font-weight: 400; margin-left: 4px; opacity: .8; }
+.lavish-rail-group summary::before { content: "\25B8"; display: inline-block; width: 12px; color: var(--fg-faint); }
+.lavish-rail-group[open] summary::before { content: "\25BE"; }
+.lavish-rail-group .lavish-card { margin-bottom: 8px; }
+.lavish-card { position: relative; border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: #fff; padding: 8px 10px 7px; display: grid; gap: 6px; font-size: 12.5px; line-height: 1.45; color: var(--fg); cursor: pointer; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04); }
+.lavish-card:hover { border-color: var(--border); }
+.lavish-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.lavish-card.is-active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(0, 149, 246, 0.18); }
+.lavish-card.is-resolved { opacity: .7; }
+.lavish-card.is-detached { border-style: dashed; opacity: .85; }
+.lavish-card.is-editing { border-color: var(--border-strong); cursor: default; }
+.lavish-card.is-flash { box-shadow: 0 0 0 3px rgba(0, 149, 246, .35); transition: box-shadow .2s; }
+.lavish-card-top { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.lavish-card-n { flex: 0 0 auto; display: inline-block; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: #8e8e8e; color: #fff; font-size: 10.5px; font-weight: 700; line-height: 18px; text-align: center; }
+.lavish-card.is-queued .lavish-card-n { background: var(--accent); color: var(--accent-ink); }
+.lavish-card.is-sent .lavish-card-n { background: var(--ig-green); color: #fff; }
+.lavish-chip { flex: 0 0 auto; font-size: 10px; text-transform: uppercase; letter-spacing: .07em; font-weight: var(--w-semi); color: var(--fg-faint); }
+.lavish-card.is-queued .lavish-chip { color: var(--accent); }
+.lavish-card.is-sent .lavish-chip { color: var(--ig-green); }
+.lavish-card-anchor { flex: 1 1 auto; min-width: 0; color: var(--fg-faint); font-size: 11.5px; font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lavish-card-body { white-space: pre-wrap; word-break: break-word; }
+.lavish-card-body i { color: var(--fg-faint); }
+.lavish-card-suggestion del { display: block; color: var(--fg-faint); text-decoration: line-through; text-decoration-color: #d9a0a0; margin-bottom: 4px; }
+.lavish-card-suggestion ins { display: block; text-decoration: none; background: #e6f4ea; border-radius: 4px; padding: 2px 5px; }
+.lavish-card-reply { background: var(--bg-elevated); border-radius: 8px; padding: 5px 9px; margin: 0 0 0 10px; font-size: 12px; color: var(--fg-muted); white-space: pre-wrap; }
+.lavish-card-reply small { display: block; font-size: 10.5px; color: var(--fg-faint); margin-bottom: 1px; }
+.lavish-card-edit { width: 100%; min-height: 72px; resize: vertical; border-radius: var(--radius-md); border: 1px solid var(--border); background: #fff; color: var(--fg); padding: 7px 9px; font: inherit; font-size: 12.5px; line-height: 1.45; }
+.lavish-card-edit:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.lavish-card-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 4px; margin: 0 -4px -2px; }
+.lavish-card-actions button { background: none; border: 0; color: var(--fg-dim); font: inherit; font-size: 11.5px; padding: 2px 5px; border-radius: 6px; cursor: pointer; }
+.lavish-card-actions button:hover { color: var(--fg); background: var(--bg-elevated); }
+.lavish-card-actions button[data-act="save"], .lavish-card-actions button[data-act="queue"] { color: var(--accent); }
+.lavish-card-actions button[data-act="delete"]:hover, .lavish-card-actions button[data-act="remove"]:hover { color: var(--danger); }
+.lavish-card-hint, .lavish-card-meta { margin-left: auto; color: var(--fg-faint); font-size: 10.5px; white-space: nowrap; padding-right: 4px; }

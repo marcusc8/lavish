@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PLAN TITLE (short, distinctive)</title>
+<meta name="lavish:project" content="StyleManager-2.0">
+<meta name="description" content="ONE SENTENCE: what this plan decides. Shown on the Lavish home page.">
+<!-- <meta name="lavish:related" content="docs/plans/YYYY-MM-DD-previous-plan.html"> -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  /* ── Plan template (Lavish skill, 2026-09-02). Editorial paper look, one accent, sticky outline. ──
+     Copy this file as the starting point of every plan. Keep it self-contained: no build step, no
+     external dependency but the Mermaid CDN, opens directly without a server. */
+  :root { --paper: #faf9f6; --ink: #1c1b1a; --ink-2: #4a4845; --ink-3: #7a7772; --hairline: #e6e3dd; --accent: #1f4e79; --accent-soft: #e4ecf4; --ok: #2f7d4f; --ok-soft: #e3f0e6; --warn: #8a6d1f; --warn-soft: #f6efdc; --crit: #9b3b2e; --crit-soft: #f5e4e0; --outline-w: 200px; }
+  * { box-sizing: border-box; min-width: 0; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.55 "Avenir Next", "Helvetica Neue", "Segoe UI", system-ui, sans-serif; }
+  h1, h2, h3, .h { font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; font-weight: 600; letter-spacing: -0.01em; }
+  h1 { font-size: 32px; line-height: 1.15; margin: 8px 0 12px; }
+  h3 { font-size: 19px; margin: 26px 0 8px; }
+  p { margin: 0 0 12px; }
+  a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+  code { font: 13.5px/1.4 "SF Mono", Menlo, Consolas, monospace; background: #f1efe9; padding: 1px 5px; border-radius: 4px; }
+  pre { font: 13px/1.5 "SF Mono", Menlo, Consolas, monospace; background: #f1efe9; padding: 12px 14px; border-radius: 6px; overflow-x: auto; }
+  .kicker { font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  .meta { color: var(--ink-3); font-size: 14px; margin-bottom: 26px; }
+  .lede { font-size: 18.5px; line-height: 1.5; color: var(--ink-2); }
+
+  /* layout: sticky outline + document */
+  .page { display: grid; grid-template-columns: var(--outline-w) minmax(0, 1fr); gap: 32px; max-width: 1180px; margin: 0 auto; padding: 22px 28px 120px; }
+  main { max-width: 880px; min-width: 0; }
+  .outline { position: sticky; top: 56px; align-self: start; max-height: calc(100vh - 72px); overflow-y: auto; font-size: 13px; padding-right: 8px; }
+  .outline-head { display: flex; align-items: center; justify-content: space-between; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; margin: 4px 0 8px; }
+  .outline-head button { font: inherit; font-size: 11px; letter-spacing: 0; text-transform: none; border: 0; background: none; color: var(--accent); cursor: pointer; padding: 0; }
+  .outline ol { list-style: none; margin: 0; padding: 0; }
+  .outline li { display: flex; align-items: baseline; gap: 8px; padding: 4px 6px; border-radius: 6px; color: var(--ink-2); cursor: pointer; line-height: 1.35; }
+  .outline li:hover { background: #f1efe9; }
+  .outline li.is-active { background: var(--accent-soft); color: var(--ink); }
+  .outline li .dot { width: 8px; height: 8px; border-radius: 50%; background: #d6d1c7; flex: 0 0 auto; position: relative; top: -1px; }
+  .outline li .dot.approved { background: var(--ok); } .outline li .dot.changes { background: var(--crit); } .outline li .dot.question { background: var(--warn); }
+  .outline li .n { color: var(--ink-3); font-variant-numeric: tabular-nums; min-width: 14px; }
+  .outline-tally { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--hairline); color: var(--ink-3); font-size: 12px; line-height: 1.5; }
+  .outline-fab { display: none; position: fixed; left: 14px; bottom: 16px; z-index: 12; font: inherit; font-size: 13px; padding: 7px 12px; border: 1px solid var(--hairline); border-radius: 999px; background: #fff; color: var(--accent); cursor: pointer; box-shadow: 0 6px 20px rgba(0,0,0,.08); }
+  @media (max-width: 1000px) {
+    .page { grid-template-columns: minmax(0, 1fr); }
+    .outline { display: none; }
+    .outline.is-open { display: block; position: fixed; left: 0; top: 0; bottom: 0; width: min(300px, 86vw); max-height: none; z-index: 20; background: #fff; padding: 16px 14px; box-shadow: 0 0 40px rgba(0,0,0,.18); }
+    .outline-fab { display: block; }
+  }
+  body.outline-hidden .page { grid-template-columns: minmax(0, 1fr); }
+  body.outline-hidden .outline { display: none; }
+  .outline-toggle { font: inherit; font-size: 12.5px; padding: 4px 10px; border: 1px solid var(--hairline); border-radius: 999px; background: #fff; color: var(--ink-2); cursor: pointer; }
+  .outline-toggle[aria-pressed="true"] { background: var(--accent-soft); border-color: #cfdae6; color: var(--accent); }
+  .stage { margin: 0 0 22px; }
+  .stage-steps { display: flex; gap: 5px; list-style: none; margin: 0; padding: 0; max-width: 640px; }
+  .stage-steps li { flex: 1; text-align: center; padding: 6px 4px; border-radius: 6px; background: #f1efe9; color: var(--ink-3); font-size: 12.5px; }
+  .stage-steps li.is-past { background: var(--accent-soft); color: var(--accent); }
+  .stage-steps li.is-now { background: var(--accent); color: #fff; font-weight: 600; }
+  .stage.is-inferred .stage-steps li.is-now { background: #fff; color: var(--accent); outline: 2px dashed var(--accent); outline-offset: -2px; }
+  .stage.is-parked .stage-steps li { opacity: .5; }
+  .stage-note { font-size: 13px; color: var(--ink-3); margin: 6px 0 0; }
+  .stage-note b { color: var(--ink-2); font-weight: 500; }
+  .example { border: 1px solid #d9e4d0; background: #eef5e9; border-radius: 6px; padding: 10px 14px; margin: 14px 0; }
+  .example::before { content: "For example"; display: block; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--ok); font-weight: 600; margin-bottom: 4px; }
+  .export-opts { display: grid; gap: 8px; margin: 0 0 10px; font-size: 14px; }
+  .export-opts .row { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+  .export-opts .row > span { color: var(--ink-3); font-size: 12.5px; min-width: 56px; }
+  .export-opts label { display: inline-flex; gap: 5px; align-items: center; }
+  .export-opts label.off { color: var(--ink-3); }
+  .export-hint { font-size: 12.5px; color: var(--ink-3); }
+
+  /* sections: collapsible, with a one-line summary and badges visible when closed */
+  section.blk { border-top: 1px solid var(--hairline); padding: 8px 0 16px; }
+  details > summary.h { cursor: pointer; padding: 12px 0; list-style: none; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; grid-template-areas: "caret title badges" "caret sum badges"; column-gap: 10px; align-items: baseline; }
+  details > summary.h::-webkit-details-marker { display: none; }
+  details > summary.h::before { content: "▸"; grid-area: caret; color: var(--ink-3); font-size: 16px; }
+  details[open] > summary.h::before { content: "▾"; }
+  summary.h .title { grid-area: title; font-size: 22px; }
+  summary.h .sum { grid-area: sum; font-family: "Avenir Next", "Helvetica Neue", system-ui, sans-serif; font-weight: 400; font-size: 14px; color: var(--ink-3); margin-top: 2px; }
+  details[open] > summary.h .sum { display: none; }
+  summary.h .badges { grid-area: badges; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; font: 11px/1 "Avenir Next", system-ui, sans-serif; }
+  .badges span, .sbadge { padding: 3px 8px; border-radius: 999px; background: #ecebe6; color: var(--ink-3); white-space: nowrap; }
+  .badges span.risk { background: var(--warn-soft); color: var(--warn); }
+  .sbadge.approved { background: var(--ok-soft); color: var(--ok); } .sbadge.changes { background: var(--crit-soft); color: var(--crit); } .sbadge.question { background: var(--warn-soft); color: var(--warn); }
+
+  /* content blocks */
+  ul.styled, ol.styled { padding-left: 0; margin: 8px 0 14px; list-style: none; }
+  ul.styled li, ol.styled li { position: relative; padding-left: 22px; margin: 5px 0; }
+  ul.styled li::before { content: ""; position: absolute; left: 6px; top: .68em; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+  ol.styled { counter-reset: n; } ol.styled li::before { counter-increment: n; content: counter(n) "."; position: absolute; left: 0; color: var(--accent); font-weight: 600; font-variant-numeric: tabular-nums; }
+  table { width: 100%; border-collapse: collapse; margin: 10px 0 18px; font-size: 14.5px; }
+  th { text-align: left; font-size: 12px; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-3); padding: 8px 10px; border-bottom: 1px solid var(--hairline); }
+  td { padding: 9px 10px; vertical-align: top; }
+  tbody tr:nth-child(even) td { background: #f4f2ed; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  table.alts tr.rec td { background: var(--ok-soft); } table.alts tr.rec td:first-child::after { content: " · recommended"; color: var(--ok); font-size: 12px; font-weight: 600; }
+  .tag { display: inline-block; font-size: 11.5px; padding: 1px 7px; border-radius: 4px; border: 1px solid; white-space: nowrap; }
+  .tag.ok { color: var(--ok); border-color: var(--ok); } .tag.warn { color: var(--warn); border-color: var(--warn); } .tag.crit { color: var(--crit); border-color: var(--crit); } .tag.dim { color: var(--ink-3); border-color: var(--hairline); }
+  .callout { border: 1px solid #cfdae6; background: var(--accent-soft); padding: 10px 14px; margin: 14px 0; border-radius: 6px; }
+  .callout.warn { border-color: #e2d3a6; background: var(--warn-soft); }
+  .answer { border: 1px solid #cfdae6; background: var(--accent-soft); border-radius: 8px; padding: 14px 16px; margin: 6px 0 16px; font-size: 17px; line-height: 1.5; }
+  .mermaid-frame { resize: both; overflow: auto; border: 1px solid var(--hairline); border-radius: 6px; background: #fff; padding: 12px; min-height: 240px; max-width: 100%; margin: 12px 0 4px; }
+  .mermaid-frame svg { width: 100% !important; height: auto !important; max-width: none; }
+  .figcap { font-size: 13px; color: var(--ink-3); margin: 0 0 16px; }
+  .diffold { background: var(--crit-soft); text-decoration: line-through; color: var(--crit); padding: 0 3px; } .diffnew { background: var(--ok-soft); color: var(--ok); padding: 0 3px; }
+
+  /* decisions: cards near the top, recommended option pre-marked, decided ones show their answer */
+  .dgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin: 10px 0 16px; }
+  .dform { border: 1px solid var(--hairline); border-radius: 8px; padding: 14px 16px; background: #fff; }
+  .dform h4 { margin: 0 0 4px; font-size: 15.5px; } .dform .why { color: var(--ink-2); font-size: 13.5px; margin: 0 0 10px; }
+  .dform label { display: block; padding: 4px 0; font-size: 14.5px; } .dform label input { margin-right: 8px; }
+  .dform .rec { font-size: 11px; color: var(--ok); border: 1px solid var(--ok); border-radius: 4px; padding: 0 6px; margin-left: 6px; }
+  .dform .row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+  .dform textarea { flex: 1 1 auto; min-height: 36px; font: inherit; font-size: 13.5px; padding: 6px 8px; border: 1px solid var(--hairline); border-radius: 6px; }
+  .dform .decided { display: inline-block; font-size: 12px; color: var(--ok); background: var(--ok-soft); border-radius: 4px; padding: 1px 7px; margin-bottom: 8px; }
+  .dform[data-decided] label { color: var(--ink-3); }
+  .queued { font-size: 12.5px; color: var(--ok); }
+  button { font: inherit; font-size: 14px; padding: 6px 12px; border: 1px solid var(--accent); border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer; }
+  button.q { background: #fff; color: var(--accent); }
+
+  /* phase strip: one cell per PR, coloured from the home page's registry when opened inside Lavish */
+  .phase { display: flex; gap: 5px; margin: 10px 0 14px; }
+  .phase span { flex: 1; text-align: center; padding: 6px 4px; border-radius: 5px; background: #f1efe9; color: var(--ink-3); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .phase span.merged { background: var(--ok-soft); color: var(--ok); } .phase span.open { background: var(--warn-soft); color: var(--warn); } .phase span.closed { background: var(--crit-soft); color: var(--crit); text-decoration: line-through; }
+
+  /* review layer */
+  .rowctl { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; font-size: 14px; margin: 10px 0 4px; }
+  .rowctl label { display: inline-flex; gap: 5px; align-items: center; color: var(--ink-2); }
+  .note-area { margin-top: 10px; border-top: 1px dashed var(--hairline); padding-top: 6px; }
+  #summarybar { position: sticky; top: 0; z-index: 10; display: flex; gap: 14px; align-items: center; padding: 8px 20px; background: rgba(250, 249, 246, .96); border-bottom: 1px solid var(--hairline); font-size: 13.5px; color: var(--ink-2); backdrop-filter: blur(4px); }
+  #summarybar .spacer { flex: 1; } #summarybar a { font-size: 13px; }
+  dialog { border: 1px solid var(--hairline); border-radius: 8px; padding: 18px; width: min(860px, 92vw); }
+  dialog textarea { width: 100%; height: 55vh; font: 12.5px/1.45 Menlo, monospace; }
+  .dlgrow { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+  .src { font-size: 13px; color: var(--ink-3); }
+</style>
+</head>
+<body>
+<div id="summarybar">
+  <button type="button" class="outline-toggle" id="outlineToggle" aria-pressed="true" title="Show or hide the outline">☰ Outline</button>
+  <span id="tally">0 approved · 0 needs changes · 0 questions</span>
+  <span id="stagePill" class="sbadge" hidden></span>
+  <span class="spacer"></span>
+  <a href="http://127.0.0.1:4388/" target="_blank" rel="noopener">Lavish home</a>
+  <button onclick="openExport()">Export plan (.md)</button>
+</div>
+<div class="page">
+<nav class="outline" id="outline" aria-label="Outline">
+  <div class="outline-head"><span>Outline</span><button type="button" id="outlineHide">Hide</button></div>
+  <ol id="outlineList"></ol>
+  <div class="outline-tally" id="outlineTally"></div>
+</nav>
+<main>
+  <div class="kicker">MODULE · Plan · YYYY-MM-DD</div>
+  <h1>One sentence that states the recommendation, not the topic.</h1>
+  <div class="meta">Who this is for, what was verified against the code, and where the previous version is.</div>
+  <div class="stage" id="stage"><ol class="stage-steps"><li data-stage="planning">Planning</li><li data-stage="developing">Developing</li><li data-stage="review">Review</li><li data-stage="done">Done</li></ol><div class="stage-note" id="stageNote">Stage, working session and progress appear here inside Lavish (from the home page's registry).</div></div>
+
+  <!-- 1 · READ THIS FIRST: the answer, what changed since the last version, nothing else -->
+  <section class="blk"><details open data-sec="Read this first">
+    <summary class="h"><span class="title">1 · Read this first</span><span class="sum">The answer in one paragraph and what changed since the last version.</span><span class="badges"><span>2 min</span></span></summary>
+    <div class="answer">The recommendation in one paragraph: what to do, in what order, and the one thing that would change the answer.</div>
+    <div class="example">Lead an unfamiliar or complicated topic with a concrete case using this project's own entities (a linesheet, a sample cart, a factory PO), then state the rule. Prefer a chart or a table with real numbers to adjectives; put the source link next to the claim; a picture from the web goes in <code>docs/plans/assets/&lt;slug&gt;/</code> with a caption and its source.</div>
+    <h3>What changed in this version</h3>
+    <ul class="styled"><li>One line per change, newest version first. Older rounds go under a collapsed "Earlier rounds" details block.</li></ul>
+  </details></section>
+
+  <!-- 2 · DECISIONS: everything the reader must decide, recommended option pre-marked -->
+  <section class="blk"><details open data-sec="Decisions">
+    <summary class="h"><span class="title">2 · Decisions</span><span class="sum">N decisions, recommendation pre-marked; answer and press Queue.</span><span class="badges"><span>3 min</span><span class="risk">1 touches prod</span></span></summary>
+    <div class="dgrid">
+      <form class="dform" data-lavish-question="D1 example">
+        <h4>D1 · The question, as a question?</h4>
+        <p class="why">Why it matters and what breaks if the answer is wrong.</p>
+        <label><input type="radio" name="d1" value="Option A" checked> Option A <span class="rec">recommended</span></label>
+        <label><input type="radio" name="d1" value="Option B"> Option B</label>
+        <div class="row"><textarea placeholder="Optional note"></textarea><button type="button" onclick="queueDecision(this.form, 'D1 example')">Queue</button><span class="queued" hidden>queued</span></div>
+      </form>
+      <form class="dform" data-lavish-question="D2 example" data-decided="Yes (2026-09-02)">
+        <h4>D2 · A decision already taken</h4>
+        <p class="why">Keep decided ones visible with their answer, so the record stays in the plan.</p>
+        <label><input type="radio" name="d2" value="Yes" checked> Yes</label>
+        <label><input type="radio" name="d2" value="No"> No</label>
+        <div class="row"><textarea placeholder="Optional note"></textarea><button type="button" onclick="queueDecision(this.form, 'D2 example')">Queue</button><span class="queued" hidden>queued</span></div>
+      </form>
+    </div>
+    <h3>Alternatives, the standard table</h3>
+    <table class="alts"><thead><tr><th>Option</th><th>What it buys</th><th>What it costs</th></tr></thead><tbody>
+      <tr class="rec"><td>Option A</td><td>…</td><td>…</td></tr>
+      <tr><td>Option B</td><td>…</td><td>…</td></tr>
+    </tbody></table>
+  </details></section>
+
+  <!-- 3+ · EVIDENCE: current state, design, plan by PR, risks, open questions -->
+  <section class="blk"><details data-sec="Current state">
+    <summary class="h"><span class="title">3 · Current state</span><span class="sum">What exists today, verified against the code, with file paths.</span><span class="badges"><span>4 min</span><span>verified against code</span></span></summary>
+    <p>…</p>
+  </details></section>
+
+  <section class="blk"><details data-sec="Design">
+    <summary class="h"><span class="title">4 · Design</span><span class="sum">The target shape and how it differs from today.</span><span class="badges"><span>5 min</span></span></summary>
+    <div class="mermaid-frame"><pre class="mermaid">
+flowchart LR
+  A[Today] --> B[Target]
+    </pre></div>
+    <p class="figcap">Caption: what the diagram shows.</p>
+  </details></section>
+
+  <section class="blk"><details data-sec="Plan by PR">
+    <summary class="h"><span class="title">5 · Plan by PR</span><span class="sum">Landable slices in order; the strip shows live PR states inside Lavish.</span><span class="badges"><span>3 min</span><span class="risk">touches prod: migration</span></span></summary>
+    <div class="phase" id="phase"><span data-pr="">PR1 · scope</span><span data-pr="">PR2 · scope</span><span data-pr="">PR3 · scope</span></div>
+    <table><thead><tr><th>PR</th><th>Scope</th><th>Depends on</th><th>Verify by</th></tr></thead><tbody>
+      <tr><td>PR1</td><td>…</td><td>–</td><td>…</td></tr>
+    </tbody></table>
+  </details></section>
+
+  <section class="blk"><details data-sec="Risks and what to review">
+    <summary class="h"><span class="title">6 · Risks and what to review</span><span class="sum">Ordered by how silently it fails; what could not be verified is named.</span><span class="badges"><span>2 min</span></span></summary>
+    <ol class="styled"><li>Highest: RLS, money, migrations, Edge deploys.</li><li>Then: visual and cross-module effects.</li><li>Not verifiable here: …</li></ol>
+  </details></section>
+
+  <section class="blk"><details data-sec="Open questions">
+    <summary class="h"><span class="title">7 · Open questions</span><span class="sum">What still needs an answer from someone.</span><span class="badges"><span>1 min</span></span></summary>
+    <ul class="styled"><li>…</li></ul>
+  </details></section>
+
+  <section class="blk"><details data-sec="Feedback log">
+    <summary class="h"><span class="title">8 · Feedback log</span><span class="sum">Every review round: what was received, what changed.</span><span class="badges"><span>log</span></span></summary>
+    <ul id="feedlog" class="styled"></ul>
+  </details></section>
+</main>
+</div>
+<button class="outline-fab" id="outlineFab" type="button">Outline</button>
+
+<dialog id="exportdlg">
+  <h3 style="margin-top:0">Export plan</h3>
+  <div class="export-opts">
+    <div class="row"><span>Format</span><label><input type="radio" name="xfmt" value="md" checked onchange="exportFormatChanged()"> Markdown</label><label class="needs-lavish"><input type="radio" name="xfmt" value="html" onchange="exportFormatChanged()"> HTML (self-contained)</label><label class="needs-lavish"><input type="radio" name="xfmt" value="pdf" onchange="exportFormatChanged()"> PDF</label></div>
+    <div class="row"><span>Content</span><label class="needs-lavish"><input type="checkbox" id="xplan" checked onchange="exportFormatChanged()"> the plan</label><label class="needs-lavish"><input type="checkbox" name="xinc" value="chat" onchange="exportFormatChanged()"> agent conversation</label><label class="needs-lavish"><input type="checkbox" name="xinc" value="comments" onchange="exportFormatChanged()"> comments sent</label><label class="needs-lavish"><input type="checkbox" name="xinc" value="notes" onchange="exportFormatChanged()"> private notes</label></div>
+    <div class="export-hint" id="exporthint">The plan alone by default. Tick what to append, or untick the plan to export only your review material.</div>
+  </div>
+  <textarea id="exporttext" readonly></textarea>
+  <div class="dlgrow">
+    <button type="button" id="copybtn" onclick="copyExport()">Copy</button>
+    <button type="button" class="q" id="downloadbtn" onclick="downloadExport()">Download</button>
+    <button type="button" class="q" id="sendagentbtn" onclick="sendExport()" hidden>Send to agent</button>
+    <span style="flex:1"></span>
+    <button type="button" class="q" onclick="document.getElementById('exportdlg').close()">Close</button>
+  </div>
+</dialog>
+
+<script>
+/* ---------- safe localStorage (the Lavish iframe has no allow-same-origin: every access may throw) ---------- */
+const store = {
+  get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* memory-only */ } },
+};
+const KEY = "plan-YYYY-MM-DD-slug"; // change per plan
+const state = store.get(KEY, { status: {}, log: [] });
+const HOME = "http://127.0.0.1:4388";
+// Inside Lavish the artifact is served at /artifact/<session key>/…; outside, there is no key and live features stay off.
+const SESSION_KEY = (/\/artifact\/([0-9a-f]{16})\//.exec(location.pathname) || [])[1] || "";
+
+/* ---------- per-section status + sticky outline ---------- */
+const sections = [...document.querySelectorAll("details[data-sec]")];
+const outlineList = document.getElementById("outlineList");
+sections.forEach((det, i) => {
+  const sec = det.dataset.sec;
+  const li = document.createElement("li");
+  li.dataset.sec = sec;
+  li.innerHTML = `<span class="dot"></span><span class="n">${i + 1}</span><span class="t">${det.querySelector("summary .title")?.textContent.replace(/^\d+\s*·\s*/, "") ?? sec}</span>`;
+  li.onclick = () => { det.open = true; det.scrollIntoView({ block: "start" }); };
+  outlineList.appendChild(li);
+  if (sec === "Feedback log") return;
+  const wrap = document.createElement("div");
+  wrap.className = "note-area";
+  wrap.innerHTML = `<div class="rowctl">
+      <label><input type="radio" name="st-${sec}" value="approved"> Approved</label>
+      <label><input type="radio" name="st-${sec}" value="changes"> Needs changes</label>
+      <label><input type="radio" name="st-${sec}" value="question"> Question</label>
+      <span style="color:var(--ink-3);font-size:12.5px">For a note, click any element: Keep private or Queue.</span>
+    </div>`;
+  det.appendChild(wrap);
+  wrap.querySelectorAll(`input[name="st-${sec}"]`).forEach((r) => {
+    if (state.status[sec] === r.value) r.checked = true;
+    r.onchange = () => { state.status[sec] = r.value; store.set(KEY, state); refresh(); };
+  });
+});
+function refresh() {
+  let ap = 0, ch = 0, q = 0;
+  sections.forEach((det) => {
+    const st = state.status[det.dataset.sec];
+    const dot = outlineList.querySelector(`li[data-sec="${det.dataset.sec.replace(/"/g, '\\"')}"] .dot`);
+    if (dot) dot.className = "dot " + (st || "");
+    if (st === "approved") ap++; else if (st === "changes") ch++; else if (st === "question") q++;
+  });
+  const t = `${ap} approved · ${ch} needs changes · ${q} questions`;
+  document.getElementById("tally").textContent = t;
+  document.getElementById("outlineTally").textContent = t + ` · ${sections.length} sections`;
+}
+refresh();
+// Active section follows the reading position.
+const io = new IntersectionObserver((entries) => {
+  const top = entries.filter((e) => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+  if (!top) return;
+  outlineList.querySelectorAll("li").forEach((li) => li.classList.toggle("is-active", li.dataset.sec === top.target.dataset.sec));
+}, { rootMargin: "-56px 0px -60% 0px" });
+sections.forEach((d) => io.observe(d));
+// Outline show/hide (desktop toggle + phone drawer).
+const outline = document.getElementById("outline"), fab = document.getElementById("outlineFab");
+if (store.get(KEY + ":outline", "open") === "hidden") document.body.classList.add("outline-hidden");
+const outlineToggle = document.getElementById("outlineToggle");
+const narrow = () => window.matchMedia("(max-width: 1000px)").matches;
+function syncOutlineToggle() { const shown = narrow() ? outline.classList.contains("is-open") : !document.body.classList.contains("outline-hidden"); outlineToggle.setAttribute("aria-pressed", String(shown)); }
+function setOutline(shown) { if (narrow()) outline.classList.toggle("is-open", shown); else { document.body.classList.toggle("outline-hidden", !shown); store.set(KEY + ":outline", shown ? "open" : "hidden"); } syncOutlineToggle(); }
+outlineToggle.onclick = () => setOutline(narrow() ? !outline.classList.contains("is-open") : document.body.classList.contains("outline-hidden"));
+document.getElementById("outlineHide").onclick = () => setOutline(false);
+fab.onclick = () => { document.body.classList.remove("outline-hidden"); outline.classList.toggle("is-open"); syncOutlineToggle(); };
+document.addEventListener("click", (e) => { if (outline.classList.contains("is-open") && !e.target.closest("#outline, #outlineFab, #outlineToggle")) { outline.classList.remove("is-open"); syncOutlineToggle(); } });
+window.matchMedia("(max-width: 1000px)").addEventListener("change", syncOutlineToggle);
+syncOutlineToggle();
+(state.log ?? []).forEach((e) => { const li = document.createElement("li"); li.textContent = `${new Date(e.ts).toLocaleString()} · ${e.text}`; document.getElementById("feedlog").appendChild(li); });
+
+/* ---------- decisions ---------- */
+document.querySelectorAll(".dform[data-decided]").forEach((f) => { const d = document.createElement("span"); d.className = "decided"; d.textContent = "Decided: " + f.dataset.decided; f.querySelector("h4").after(d); });
+function queueDecision(form, label) {
+  const v = form.querySelector("input[type=radio]:checked")?.value;
+  if (!v) return;
+  const note = form.querySelector("textarea")?.value.trim();
+  const text = `${label}: ${v}${note ? `. Note: ${note}` : ""}`;
+  logLocal(text);
+  if (window.lavish?.queuePrompt) { window.lavish.queuePrompt(text, { tag: "choice", text, element: form, queueKey: form.dataset.lavishQuestion }); form.querySelector(".queued").hidden = false; }
+  else alert("Queued locally (no Lavish SDK): " + text);
+}
+function logLocal(text) {
+  state.log.push({ ts: new Date().toISOString(), text }); store.set(KEY, state);
+  const li = document.createElement("li"); li.textContent = `${new Date().toLocaleString()} · ${text}`; document.getElementById("feedlog").appendChild(li);
+}
+
+/* ---------- stage strip + phase strip: live from the home page inside Lavish, frozen in exports ---------- */
+async function loadPlan() {
+  if (window.__LAVISH_EXPORT?.plan) return window.__LAVISH_EXPORT.plan;
+  if (!SESSION_KEY) return null;
+  try { const r = await fetch(`${HOME}/api/registry/${SESSION_KEY}`, { cache: "no-store" }); return r.ok ? (await r.json()).plan : null; } catch { return null; }
+}
+const STAGE_ORDER = ["planning", "developing", "review", "done"];
+const relTime = (iso) => { const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000); return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
+function paintPlan(plan) {
+  if (!plan) return;
+  for (const c of document.querySelectorAll(".phase span[data-pr]")) { const p = (plan.prs || []).find((x) => String(x.n) === c.dataset.pr); if (p?.state) { c.className = p.state.toLowerCase(); c.title = `#${p.n} ${p.state.toLowerCase()}${p.title ? ": " + p.title : ""}`; } }
+  const stage = document.getElementById("stage");
+  if (stage) {
+    stage.classList.toggle("is-inferred", Boolean(plan.stageInferred));
+    stage.classList.toggle("is-parked", plan.stage === "parked");
+    stage.querySelectorAll(".stage-steps li").forEach((li) => { const st = li.dataset.stage; li.classList.toggle("is-now", plan.stage === st); li.classList.toggle("is-past", STAGE_ORDER.indexOf(st) < (plan.stageIndex ?? -1)); });
+    const latest = plan.progress?.latest;
+    document.getElementById("stageNote").innerHTML = `${plan.stageInferred ? "inferred: " : ""}<b>${plan.stageLabel}</b> · ${plan.subLabel || ""}${plan.progress?.pct != null ? ` · ${plan.progress.pct}% done` : ""}${latest ? ` · <b>${escapeText(latest.text)}</b> · ${escapeText(latest.session?.label || "")} · ${relTime(latest.at)}` : ` · no progress notes yet`}`;
+  }
+  const pill = document.getElementById("stagePill");
+  if (pill) { pill.hidden = false; pill.textContent = `${plan.stageLabel}${plan.subLabel ? " · " + plan.subLabel : ""}`; pill.className = "sbadge " + (plan.stage === "done" ? "approved" : plan.stage === "developing" ? "question" : ""); }
+}
+const escapeText = (t) => String(t).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+(async () => { paintPlan(await loadPlan()); if (SESSION_KEY) setInterval(async () => { if (document.visibilityState === "visible") paintPlan(await loadPlan()); }, 30000); })();
+
+/* ---------- full-plan markdown export ---------- */
+const mermaidSources = [];
+document.querySelectorAll("pre.mermaid").forEach((p) => mermaidSources.push(p.innerHTML.replace(/<br\s*\/?>/gi, "<br/>").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").trim()));
+const cellText = (c) => c.textContent.replace(/\s+/g, " ").trim().replace(/\|/g, "\\|");
+function domToMd() {
+  let md = "", mi = 0;
+  const walk = (el) => {
+    for (const node of el.children) {
+      const t = node.tagName, cl = node.classList;
+      if (t === "H1") md += `# ${node.textContent}\n\n`;
+      else if (cl?.contains("kicker") || cl?.contains("meta")) md += `*${node.textContent.trim()}*\n\n`;
+      else if (cl?.contains("mermaid-frame")) md += "```mermaid\n" + (mermaidSources[mi++] ?? "") + "\n```\n\n";
+      else if (cl?.contains("stage")) { const note = document.getElementById("stageNote")?.textContent.trim(); if (note && !/appear here inside Lavish/.test(note)) md += `**Stage:** ${note}\n\n`; }
+      else if (cl?.contains("example")) md += `> **For example.** ${node.textContent.replace(/\s+/g, " ").trim()}\n\n`;
+      else if (cl?.contains("note-area")) continue;
+      else if (cl?.contains("figcap") || cl?.contains("src")) md += `*${node.textContent.replace(/\s+/g, " ").trim()}*\n\n`;
+      else if (cl?.contains("answer") || cl?.contains("callout")) md += `> ${node.textContent.replace(/\s+/g, " ").trim()}\n\n`;
+      else if (cl?.contains("phase")) { md += [...node.children].map((c) => `- ${c.textContent.trim()}${c.className ? ` (${c.className})` : ""}`).join("\n") + "\n\n"; }
+      else if (cl?.contains("dform")) {
+        md += `**${node.querySelector("h4")?.textContent}**${node.dataset.decided ? ` · decided: ${node.dataset.decided}` : ""}\n\n${node.querySelector(".why")?.textContent.trim() ?? ""}\n\n`;
+        node.querySelectorAll("label").forEach((l) => md += `- [${l.querySelector("input")?.checked ? "x" : " "}] ${l.textContent.replace(/\s+/g, " ").trim()}\n`);
+        md += "\n";
+      }
+      else if (t === "SECTION" || t === "DETAILS" || t === "DIV" || t === "MAIN") walk(node);
+      else if (t === "SUMMARY") { md += `## ${node.querySelector(".title")?.textContent.trim() ?? node.textContent.trim()}\n\n`; const sum = node.querySelector(".sum")?.textContent.trim(); if (sum) md += `*${sum}*\n\n`; }
+      else if (t === "H3") md += `### ${node.textContent.trim()}\n\n`;
+      else if (t === "P") md += node.textContent.replace(/\s+/g, " ").trim() + "\n\n";
+      else if ((t === "UL" || t === "OL") && node.id !== "feedlog") { let i = 0; for (const li of node.querySelectorAll(":scope > li")) md += (t === "OL" ? `${++i}. ` : "- ") + li.textContent.replace(/\s+/g, " ").trim() + "\n"; md += "\n"; }
+      else if (t === "TABLE") { const rows = [...node.querySelectorAll("tr")].map((tr) => [...tr.children].map(cellText)); if (rows.length) { md += `| ${rows[0].join(" | ")} |\n| ${rows[0].map(() => "---").join(" | ")} |\n`; rows.slice(1).forEach((r) => md += `| ${r.join(" | ")} |\n`); md += "\n"; } }
+      else if (t === "PRE") md += "```\n" + node.textContent + "\n```\n\n";
+    }
+  };
+  walk(document.querySelector("main"));
+  md += "\n## Review notes\n\n";
+  for (const [sec, st] of Object.entries(state.status)) md += `- **${sec}**: ${st}\n`;
+  if (state.log.length) { md += "\n### Feedback log\n\n"; state.log.forEach((e) => md += `- ${e.ts} · ${e.text}\n`); }
+  return md;
+}
+function exportFormat() { return document.querySelector('input[name="xfmt"]:checked')?.value || "md"; }
+function exportIncludes() { return [...document.querySelectorAll('input[name="xinc"]:checked')].map((c) => c.value); }
+function exportWithPlan() { const b = document.getElementById("xplan"); return !b || b.checked; }
+function exportFormatChanged() {
+  const fmt = exportFormat(), withPlan = exportWithPlan(), inc = exportIncludes();
+  document.getElementById("exporttext").hidden = fmt !== "md" || !withPlan;
+  document.getElementById("copybtn").hidden = fmt !== "md" || !withPlan;
+  document.getElementById("sendagentbtn").hidden = fmt !== "md" || !withPlan || !window.lavish?.queuePrompt;
+  document.getElementById("downloadbtn").disabled = !withPlan && !inc.length;
+  document.getElementById("exporthint").textContent = !SESSION_KEY ? "Open this plan in Lavish for HTML, PDF and the appendices; Markdown of the plan works anywhere."
+    : !withPlan && !inc.length ? "Nothing selected: tick the plan or at least one of the appendices."
+    : !withPlan ? `Review material only (${inc.join(", ")}), without the plan, as ${fmt.toUpperCase()}.`
+    : fmt === "pdf" ? "PDF is rendered by the home page with the headless Chromium on this machine; it opens in a new tab as a download." : fmt === "html" ? "A self-contained HTML file (assets inlined), optionally with the ticked appendices." : "Markdown of the whole plan; appendices are added by the home page when ticked.";
+}
+function openExport() {
+  document.getElementById("exporttext").value = domToMd();
+  for (const l of document.querySelectorAll(".needs-lavish")) { l.classList.toggle("off", !SESSION_KEY); l.querySelector("input").disabled = !SESSION_KEY; }
+  if (!SESSION_KEY) { document.querySelector('input[name="xfmt"][value="md"]').checked = true; document.getElementById("xplan").checked = true; }
+  exportFormatChanged();
+  document.getElementById("exportdlg").showModal();
+}
+function copyExport() { const ta = document.getElementById("exporttext"); ta.select(); try { navigator.clipboard.writeText(ta.value); } catch { document.execCommand("copy"); } }
+function downloadExport() {
+  const fmt = exportFormat(), inc = exportIncludes(), withPlan = exportWithPlan();
+  if (!withPlan && !inc.length) return;
+  if (!SESSION_KEY || (fmt === "md" && withPlan && !inc.length)) {
+    const blob = new Blob([document.getElementById("exporttext").value], { type: "text/markdown" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "plan.md"; a.click();
+    logLocal("Exported Markdown"); return;
+  }
+  // Open the tab inside the click (keeps the user activation), hand the page's Markdown to the home page, then navigate.
+  const win = window.open("about:blank", "_blank");
+  const url = `${HOME}/export/${SESSION_KEY}?format=${fmt}${inc.length ? "&include=" + inc.join(",") : ""}${withPlan ? "" : "&plan=0"}`;
+  const go = () => { if (win) win.location = url; else window.open(url, "_blank"); };
+  fetch(`${HOME}/api/export/${SESSION_KEY}/plan.md`, { method: "PUT", headers: { "content-type": "text/plain" }, body: domToMd() }).then(go, go);
+  logLocal(`Exported ${withPlan ? "plan" : "review material"} as ${fmt}${inc.length ? " + " + inc.join(", ") : ""}`);
+}
+function sendExport() { window.lavish?.queuePrompt("Save this exported plan to a .md file next to the artifact and confirm the path.", { tag: "export", text: document.getElementById("exporttext").value }); logLocal("Export sent to agent"); }
+
+/* ---------- mermaid ---------- */
+mermaid.initialize({ startOnLoad: false, theme: "neutral", securityLevel: "loose" });
+mermaid.run({ querySelector: "pre.mermaid" });
+</script>
+</body>
+</html>

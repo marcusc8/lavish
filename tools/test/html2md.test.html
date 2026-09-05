@@ -1,0 +1,8 @@
+<!doctype html><meta charset="utf-8"><title>html2md test</title>
+<script src="../html2md.js"></script>
+<script>
+const docs = `<meta charset='utf-8'><b style="font-weight:normal;" id="docs-internal-guid-5c5a"><h2 dir="ltr"><span style="font-size:16pt;font-weight:700;">Samples round 3, scope</span></h2><p dir="ltr"><span style="font-weight:400;">The </span><span style="font-weight:700;">Approve All</span><span style="font-weight:400;"> button should live in the </span><span style="font-style:italic;">cart header</span><span style="font-weight:400;">.</span></p><ul style="margin-top:0;"><li dir="ltr"><p dir="ltr"><span>Tier 1 orders skip US review</span></p></li><li dir="ltr"><p dir="ltr"><span>Tier 2 gets </span><span style="font-weight:700;">at-showroom</span></p><ul><li dir="ltr"><p><span>nested item</span></p></li></ul></li></ul><ol><li dir="ltr"><p><span>First step</span></p></li><li dir="ltr"><p><span>Second step</span></p></li></ol><div dir="ltr" align="left"><table style="border:none;"><colgroup><col width="120"/><col width="120"/></colgroup><tbody><tr><td><p><span style="font-weight:700;">Field</span></p></td><td><p><span style="font-weight:700;">Source</span></p></td></tr><tr><td><p><span>cart_state</span></p></td><td><p><span>approval buttons</span></p></td></tr></tbody></table></div><p><a href="https://app.stylaos.com/samples"><span style="text-decoration:underline;">samples page</span></a></p></b>`;
+const plain = `<meta charset='utf-8'><span style="color: rgb(0,0,0)">just a sentence with no structure</span>`;
+const results = { docs: window.__lavishHtmlToMarkdown(docs), plain: window.__lavishHtmlToMarkdown(plain), empty: window.__lavishHtmlToMarkdown("") };
+window.__results = results;
+</script>
