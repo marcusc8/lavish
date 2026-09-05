@@ -522,7 +522,7 @@ const CLIENT_JS = `
     function sync(){var f=free&&free.value;inp.value=f&&(!sel.value||always)?f:labelOf(sel);}
     sync();var hi=-1,items=[];
     function opts(){return [].map.call(sel.options,function(o){return {v:o.value,t:o.textContent};});}
-    function starts(o,s){return (o.t.toLowerCase()+" "+o.v.toLowerCase()).split(/[\s\-_./:]+/).some(function(w){return w.indexOf(s)===0;});}
+    function starts(o,s){return (o.t.toLowerCase()+" "+o.v.toLowerCase()).split(/[\\s\\-_./:]+/).some(function(w){return w.indexOf(s)===0;});}
     function render(q){var s=(q||"").toLowerCase();var all=opts();items=!s?all:all.filter(function(o){return starts(o,s);});if(s&&!items.length)items=all.filter(function(o){return o.t.toLowerCase().indexOf(s)!==-1||o.v.toLowerCase().indexOf(s)!==-1;});list.innerHTML=items.map(function(o,i){return '<div class="cbo'+(o.v===sel.value?" on":"")+'" data-i="'+i+'"><span>'+esc(o.t)+'</span>'+(o.v&&o.v!==o.t?'<span class="cbv">'+esc(o.v)+'</span>':"")+'</div>';}).join("")||'<div class="cbo none">'+(free?"free text: "+esc(inp.value):"no match")+'</div>';list.hidden=false;inp.setAttribute("aria-expanded","true");hi=-1;}
     function close(){list.hidden=true;inp.setAttribute("aria-expanded","false");hi=-1;}
     function choose(o){sel.value=o.v;if(free){free.value=always?o.v:"";}inp.value=o.t;sel.dispatchEvent(new Event("change",{bubbles:true}));close();}
