@@ -202,51 +202,61 @@ test("updateRegistry agent: latest + list (dedupe, newest first, cap), no update
 });
 
 
-/* ── T3: home layout (folders) ───────────────────────────────────────────── */
-test("layout: create, rename, move with a cycle guard, file plans, delete re-parents children and plans, tree and path", () => {
+/* ── T3: home layout (tags + sidebar order, v2; folders migrate) ───────────── */
+test("tags and order: create (dedupe by name), rename, delete, tag/untag, project + plan order, v1 folders migrate to tags", () => {
   const p = join(tmp, "home-layout.json");
-  assert.deepEqual(lib.readLayout(p), { folders: {}, plans: {}, updatedAt: "" });
-  const { fid: samples } = lib.createFolder("  Samples ", "", p);
-  const { fid: photo } = lib.createFolder("Photo tracks", samples, p);
-  const { fid: deep } = lib.createFolder("Deep", photo, p);
-  const { fid: repo } = lib.createFolder("Repo health", "", p);
-  assert.throws(() => lib.createFolder("", "", p), /needs a name/);
-  assert.throws(() => lib.createFolder("x", "nope", p), /no such parent/);
+  assert.deepEqual(lib.readLayout(p), { version: 2, tags: {}, plans: {}, projectOrder: [], planOrder: {}, updatedAt: "" });
+  const { tid: samples } = lib.createTag("  Samples ", p);
+  const { tid: lavish } = lib.createTag("lavish", p);
+  const again = lib.createTag("SAMPLES", p);
+  assert.equal(again.tid, samples); assert.equal(again.existed, true, "a second tag with the same name (any case) is the same tag");
+  assert.throws(() => lib.createTag("", p), /needs a name/);
   let l = lib.readLayout(p);
-  assert.equal(l.folders[samples].name, "Samples"); assert.equal(l.folders[photo].parent, samples);
-  lib.renameFolder(repo, "Repo", p);
-  assert.equal(lib.readLayout(p).folders[repo].name, "Repo");
-  // cycle guard: Samples cannot move under Photo tracks (its child) or Deep (its grandchild) or itself
-  assert.throws(() => lib.moveFolder(samples, photo, p), /own descendant/);
-  assert.throws(() => lib.moveFolder(samples, deep, p), /own descendant/);
-  assert.throws(() => lib.moveFolder(samples, samples, p), /own descendant/);
-  lib.moveFolder(repo, samples, p); assert.equal(lib.readLayout(p).folders[repo].parent, samples);
-  lib.moveFolder(repo, "", p); assert.equal(lib.readLayout(p).folders[repo].parent, "");
-  // plans
-  lib.filePlan("0123456789abcdef", samples, p); lib.filePlan("aaaaaaaaaaaaaaaa", photo, p); lib.filePlan("bbbbbbbbbbbbbbbb", deep, p);
-  assert.throws(() => lib.filePlan("short", samples, p), /bad plan key/);
-  assert.throws(() => lib.filePlan("0123456789abcdef", "zzz", p), /no such folder/);
-  lib.filePlan("cccccccccccccccc", samples, p); lib.filePlan("cccccccccccccccc", "", p);
-  l = lib.readLayout(p); assert.equal(l.plans.cccccccccccccccc, undefined); assert.equal(Object.keys(l.plans).length, 3);
-  // tree + path
-  const tree = lib.folderTree(l);
-  assert.deepEqual(tree.map((n) => n.name), ["Repo", "Samples"]);
-  assert.deepEqual(tree[1].children.map((n) => n.name), ["Photo tracks"]); assert.equal(tree[1].children[0].children[0].name, "Deep");
-  assert.deepEqual(lib.folderPath(l, deep).map((x) => x.name), ["Samples", "Photo tracks", "Deep"]);
-  assert.deepEqual(lib.folderPath(l, "nope"), []);
-  assert.deepEqual([...lib.folderDescendants(l, samples)].sort(), [samples, photo, deep].sort());
-  // delete the middle folder: Deep and the photo plan move up to Samples
-  lib.deleteFolder(photo, p);
+  assert.equal(l.tags[samples].name, "Samples"); assert.equal(Object.keys(l.tags).length, 2);
+  lib.renameTag(lavish, "Lavish tooling", p);
+  assert.equal(lib.readLayout(p).tags[lavish].name, "Lavish tooling");
+  assert.throws(() => lib.renameTag("nope", "x", p), /no such tag/);
+  // several tags per plan; untag; unknown tag / bad key refused
+  lib.tagPlan("0123456789abcdef", samples, true, p); lib.tagPlan("0123456789abcdef", lavish, true, p); lib.tagPlan("aaaaaaaaaaaaaaaa", samples, true, p);
+  assert.throws(() => lib.tagPlan("short", samples, true, p), /bad plan key/);
+  assert.throws(() => lib.tagPlan("0123456789abcdef", "zzz", true, p), /no such tag/);
   l = lib.readLayout(p);
-  assert.equal(l.folders[photo], undefined); assert.equal(l.folders[deep].parent, samples); assert.equal(l.plans.aaaaaaaaaaaaaaaa, samples); assert.equal(l.plans.bbbbbbbbbbbbbbbb, deep);
-  // delete a root folder: its children and plans go to the root (plans become unfiled)
-  lib.deleteFolder(samples, p);
+  assert.deepEqual(l.plans["0123456789abcdef"].slice().sort(), [samples, lavish].sort());
+  assert.deepEqual(lib.tagsOf(l, "0123456789abcdef").map((t) => t.name), ["Lavish tooling", "Samples"]);
+  assert.deepEqual(lib.tagList(l).map((t) => [t.name, t.count]), [["Lavish tooling", 1], ["Samples", 2]]);
+  assert.deepEqual(lib.tagList(l, new Set(["aaaaaaaaaaaaaaaa"])).map((t) => t.count), [0, 1], "counts can be limited to the plans the page shows");
+  lib.tagPlan("0123456789abcdef", lavish, false, p);
+  assert.deepEqual(lib.readLayout(p).plans["0123456789abcdef"], [samples]);
+  lib.tagPlan("aaaaaaaaaaaaaaaa", samples, false, p);
+  assert.equal(lib.readLayout(p).plans.aaaaaaaaaaaaaaaa, undefined, "a plan with no tags leaves the map");
+  // delete a tag: it comes off every plan
+  lib.tagPlan("bbbbbbbbbbbbbbbb", lavish, true, p);
+  lib.deleteTag(lavish, p);
   l = lib.readLayout(p);
-  assert.equal(l.folders[deep].parent, ""); assert.equal(l.plans["0123456789abcdef"], undefined); assert.equal(l.plans.aaaaaaaaaaaaaaaa, undefined); assert.equal(l.plans.bbbbbbbbbbbbbbbb, deep);
-  assert.throws(() => lib.deleteFolder(samples, p), /no such folder/);
+  assert.equal(l.tags[lavish], undefined); assert.equal(l.plans.bbbbbbbbbbbbbbbb, undefined); assert.deepEqual(l.plans["0123456789abcdef"], [samples]);
+  assert.throws(() => lib.deleteTag(lavish, p), /no such tag/);
+  // sidebar order: projects, and plans within a project; applyOrder puts the remembered ones first and keeps the rest as given
+  lib.setProjectOrder(["manager-marcus", "StyleManager-2.0", "manager-marcus"], p);
+  lib.setPlanOrder("StyleManager-2.0", ["bbbbbbbbbbbbbbbb", "0123456789abcdef", "nope"], p);
+  l = lib.readLayout(p);
+  assert.deepEqual(l.projectOrder, ["manager-marcus", "StyleManager-2.0"]);
+  assert.deepEqual(l.planOrder["StyleManager-2.0"], ["bbbbbbbbbbbbbbbb", "0123456789abcdef"]);
+  assert.deepEqual(lib.applyOrder(["other", "StyleManager-2.0", "claude-skills", "manager-marcus"], l.projectOrder), ["manager-marcus", "StyleManager-2.0", "other", "claude-skills"]);
+  assert.deepEqual(lib.applyOrder([{ key: "0123456789abcdef" }, { key: "cccccccccccccccc" }, { key: "bbbbbbbbbbbbbbbb" }], l.planOrder["StyleManager-2.0"], (x) => x.key).map((x) => x.key), ["bbbbbbbbbbbbbbbb", "0123456789abcdef", "cccccccccccccccc"]);
+  lib.setPlanOrder("StyleManager-2.0", [], p); assert.equal(lib.readLayout(p).planOrder["StyleManager-2.0"], undefined);
+  // a v1 file (folders) migrates on first read: each folder is a tag of its name, each filed plan carries it; the old file is kept as .v1.bak
+  const v1 = join(tmp, "v1-layout.json");
+  writeFileSync(v1, JSON.stringify({ folders: { abc123: { name: "test", parent: "", createdAt: "2026-09-04T00:00:00.000Z" }, def456: { name: "Deep", parent: "abc123" }, "bad id!": { name: "x" } }, plans: { "0123456789abcdef": "abc123", "1111111111111111": "def456", "2222222222222222": "gone" }, updatedAt: "2026-09-04T00:00:00.000Z" }));
+  l = lib.readLayout(v1);
+  assert.equal(l.version, 2);
+  assert.deepEqual(Object.values(l.tags).map((t) => t.name).sort(), ["Deep", "test"]);
+  assert.deepEqual(l.plans, { "0123456789abcdef": ["abc123"], "1111111111111111": ["def456"] });
+  assert.ok(existsSync(v1 + ".v1.bak"), "the v1 file is kept beside the new one");
+  assert.equal(JSON.parse(readFileSync(v1, "utf8")).version, 2, "the file on disk is v2 after the read");
+  assert.equal(lib.readLayout(v1).version, 2, "a second read does not migrate again");
   // a corrupt file reads as empty; dangling references are dropped on read
-  writeFileSync(p, JSON.stringify({ folders: { abc123: { name: "Ok", parent: "missing" }, "bad id!": { name: "x" } }, plans: { "0123456789abcdef": "gone", "1111111111111111": "abc123" } }));
+  writeFileSync(p, JSON.stringify({ version: 2, tags: { abc123: { name: "Ok" }, "bad id!": { name: "x" } }, plans: { "0123456789abcdef": ["gone", "abc123"], "1111111111111111": "abc123", short: ["abc123"] } }));
   l = lib.readLayout(p);
-  assert.deepEqual(Object.keys(l.folders), ["abc123"]); assert.equal(l.folders.abc123.parent, ""); assert.deepEqual(l.plans, { "1111111111111111": "abc123" });
-  writeFileSync(p, "{nope"); assert.deepEqual(lib.readLayout(p).folders, {});
+  assert.deepEqual(Object.keys(l.tags), ["abc123"]); assert.deepEqual(l.plans, { "0123456789abcdef": ["abc123"], "1111111111111111": ["abc123"] });
+  writeFileSync(p, "{nope"); assert.deepEqual(lib.readLayout(p).tags, {});
 });

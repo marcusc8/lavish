@@ -252,6 +252,65 @@ export async function startNewAgent({ provider = "claude", cwd, planPath, planKe
   return { ok: true, tmuxName: name, provider: p, sessionId, agent: sessionId ? { provider: "claude", id: sessionId, cwd: realpathOr(cwd), entrypoint: "cli", source: "home" } : null, ...(opened.ok ? {} : { terminalError: opened.error }) };
 }
 
+/* ── the model and the times of a session, from its transcript ──────────────── */
+const infoCache = new Map(); // transcript file → { mtime, info }
+/** ~/.claude/projects/<slug>/<id>.jsonl for a Claude record: its cwd's folder first, then any project folder. "" when absent. */
+export function claudeTranscriptPath(rec, root = join(process.env.CLAUDE_CONFIG_DIR || join(os.homedir(), ".claude"), "projects")) {
+  const id = String(rec?.id || ""); if (!/^[0-9a-f][0-9a-f-]{7,}$/i.test(id)) return "";
+  if (rec.cwd) { const p = join(claudeProjectDir(rec.cwd, root), `${id}.jsonl`); if (existsSync(p)) return p; }
+  for (const d of safeDir(root)) { const p = join(root, d, `${id}.jsonl`); if (existsSync(p)) return p; }
+  return "";
+}
+/** The rollout file of a Codex thread (rollout-<stamp>-<id>.jsonl under sessions/Y/M/D), searched over the last `days` days. */
+export function codexRolloutPath(id, { home = codexHome(), days = 90, now = Date.now() } = {}) {
+  const want = `-${String(id || "").toLowerCase()}.jsonl`; if (want.length < 14) return "";
+  const since = now - days * 864e5, root = join(home, "sessions");
+  for (const y of safeDir(root).sort().reverse()) for (const mo of safeDir(join(root, y)).sort().reverse()) for (const d of safeDir(join(root, y, mo)).sort().reverse()) {
+    const dayStamp = Date.parse(`${y}-${mo}-${d}T00:00:00Z`); if (Number.isFinite(dayStamp) && dayStamp < since - 864e5) continue;
+    for (const f of safeDir(join(root, y, mo, d))) if (f.startsWith("rollout-") && f.toLowerCase().endsWith(want)) return join(root, y, mo, d, f);
+  }
+  return "";
+}
+function headText(file, bytes) { try { const fd = openSync(file, "r"); const buf = Buffer.alloc(bytes); const n = readSync(fd, buf, 0, bytes, 0); closeSync(fd); return buf.toString("utf8", 0, n); } catch { return ""; } }
+function tailText(file, bytes) { const size = statSync(file).size; const start = Math.max(0, size - bytes); const fd = openSync(file, "r"); const buf = Buffer.alloc(size - start); readSync(fd, buf, 0, buf.length, start); closeSync(fd); return buf.toString("utf8"); }
+/**
+ * { model, startedAt, lastAt, file } for an agent record, read from its transcript and never from a guess:
+ * Claude = the last assistant message.model in the tail of ~/.claude/projects/<slug>/<id>.jsonl, the first timestamp in the
+ * file, the last timestamp in the tail; Codex = the rollout's session_meta (model, timestamp) and the file's mtime.
+ * Cached by the file's mtime, so a transcript still being written is re-read on its next change. Never throws.
+ */
+export function sessionInfoOf(rec, opts = {}) {
+  const none = { model: "", startedAt: "", lastAt: "", file: "" };
+  try {
+    if (!rec || !rec.id) return none;
+    const provider = rec.provider === "codex" ? "codex" : "claude";
+    const file = provider === "codex" ? codexRolloutPath(rec.id, opts.codex) : claudeTranscriptPath(rec, opts.projectsRoot);
+    if (!file) return none;
+    const mtime = statSync(file).mtimeMs;
+    const hit = infoCache.get(file); if (hit && hit.mtime === mtime) return hit.info;
+    let info;
+    if (provider === "codex") {
+      const head = headText(file, 65536).split("\n")[0];
+      let meta = null; try { meta = JSON.parse(head); } catch {}
+      const p = meta && meta.type === "session_meta" ? meta.payload || {} : {};
+      const model = String(p.model || (p.turn_context && p.turn_context.model) || (/"model":"([^"]+)"/.exec(head) || [])[1] || "");
+      info = { model, startedAt: String(p.timestamp || (meta && meta.timestamp) || ""), lastAt: new Date(mtime).toISOString(), file };
+    } else {
+      const startedAt = (/"timestamp":"([^"]+)"/.exec(headText(file, opts.headBytes || 65536)) || [])[1] || "";
+      const lines = tailText(file, opts.tailBytes || 262144).split("\n").filter(Boolean);
+      let model = "", lastAt = "";
+      for (let i = lines.length - 1; i >= 0; i--) {
+        let j; try { j = JSON.parse(lines[i]); } catch { continue; }
+        if (!lastAt && j.timestamp) lastAt = String(j.timestamp);
+        if (j.type === "assistant" && j.message && j.message.model) { model = String(j.message.model); break; }
+      }
+      info = { model, startedAt, lastAt: lastAt || new Date(mtime).toISOString(), file };
+    }
+    infoCache.set(file, { mtime, info });
+    return info;
+  } catch { return none; }
+}
+
 /* ── D11: the bounded transcript scan ────────────────────────────────────── */
 /** ~/.claude/projects/<folder>: Claude Code encodes the cwd by replacing every non-alphanumeric with "-". */
 export const claudeProjectDir = (cwd, root = join(process.env.CLAUDE_CONFIG_DIR || join(os.homedir(), ".claude"), "projects")) => join(root, String(cwd).replace(/[^A-Za-z0-9]/g, "-"));

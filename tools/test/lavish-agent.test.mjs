@@ -204,3 +204,33 @@ test("recordTerminal: newest first, deduped by tmux name, Manager Marcus's row s
   assert.deepEqual(rows.map((r) => r.tmuxName), ["mm-claude-a", "mm-codex-b"]);
   assert.equal(rows[0].createdAt, 3); assert.equal(rows[1].effort, "high"); assert.equal(rows[0].startedBy, "lavish-home");
 });
+
+test("sessionInfoOf: Claude model from the last assistant line (tail), first/last times; Codex from session_meta; cached by mtime", () => {
+  const root = join(tmp, "projects"); const slug = join(root, "-Users-m-proj"); mkdirSync(slug, { recursive: true });
+  const id = "7ad284ba-8f2a-441d-9079-dfdf35739e4c"; const f = join(slug, `${id}.jsonl`);
+  const line = (o) => JSON.stringify(o) + "\n";
+  writeFileSync(f, line({ type: "mode", sessionId: id }) + line({ type: "user", timestamp: "2026-09-05T20:00:00.000Z", message: { role: "user", content: "hi" } })
+    + line({ type: "assistant", timestamp: "2026-09-05T20:00:05.000Z", message: { model: "claude-opus-5", content: [] } })
+    + line({ type: "assistant", timestamp: "2026-09-05T20:01:00.000Z", message: { model: "claude-fable-5-1", content: [] } })
+    + line({ type: "user", timestamp: "2026-09-05T20:02:00.000Z", message: { role: "user", content: "ok" } }));
+  utimesSync(f, new Date("2026-09-05T20:02:00Z"), new Date("2026-09-05T20:02:00Z"));
+  const rec = { provider: "claude", id, cwd: "/Users/m/proj" };
+  let i = A.sessionInfoOf(rec, { projectsRoot: root });
+  assert.equal(i.model, "claude-fable-5-1", "the LAST assistant message's model, not the first");
+  assert.equal(i.startedAt, "2026-09-05T20:00:00.000Z"); assert.equal(i.lastAt, "2026-09-05T20:02:00.000Z"); assert.equal(i.file, f);
+  // found through any project folder when the cwd is unknown; absent → empty, never a throw
+  assert.equal(A.sessionInfoOf({ provider: "claude", id }, { projectsRoot: root }).model, "claude-fable-5-1");
+  assert.deepEqual(A.sessionInfoOf({ provider: "claude", id: "00000000-none", cwd: "/x" }, { projectsRoot: root }), { model: "", startedAt: "", lastAt: "", file: "" });
+  // the cache follows the mtime: a new assistant line with another model shows after the file changes
+  writeFileSync(f, line({ type: "assistant", timestamp: "2026-09-05T20:05:00.000Z", message: { model: "claude-haiku-4-5", content: [] } }), { flag: "a" });
+  utimesSync(f, new Date("2026-09-05T20:05:00Z"), new Date("2026-09-05T20:05:00Z"));
+  i = A.sessionInfoOf(rec, { projectsRoot: root });
+  assert.equal(i.model, "claude-haiku-4-5"); assert.equal(i.lastAt, "2026-09-05T20:05:00.000Z");
+  // Codex: rollout named by the thread id; model + timestamp from session_meta
+  const ch = join(tmp, "codex-info"); const day = join(ch, "sessions", "2026", "09", "05"); mkdirSync(day, { recursive: true });
+  const tid = "01a073c0-dbd3-7ab1-9ff8-6ee90a2fa565"; const rf = join(day, `rollout-2026-09-05T18-46-54-${tid}.jsonl`);
+  writeFileSync(rf, line({ timestamp: "2026-09-05T22:47:28.601Z", type: "session_meta", payload: { id: tid, timestamp: "2026-09-05T22:46:54.190Z", cwd: "/p", model: "gpt-6-astra" } }) + line({ type: "turn", x: 1 }));
+  const c = A.sessionInfoOf({ provider: "codex", id: tid }, { codex: { home: ch, now: Date.parse("2026-09-06T00:00:00Z") } });
+  assert.equal(c.model, "gpt-6-astra"); assert.equal(c.startedAt, "2026-09-05T22:46:54.190Z"); assert.equal(c.file, rf);
+  assert.equal(A.codexRolloutPath("nope-id-0000", { home: ch }), "");
+});

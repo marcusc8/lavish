@@ -8,7 +8,7 @@
  *   queue/<key>.json       unsent comments, their image copies and the card draft, mirrored by the rail. Off-limits too.
  *   versions/<key>/        snapshots of the artifact file: index.json + v0001.html, v0002.html …
  *   registry.json          per-artifact plan status / priority / PRs / summary / progress log / agent link (lavish-meta, home page)
- *   home-layout.json       the reviewer's folders on the home page (separate from plan facts, so lavish-meta never clobbers them)
+ *   home-layout.json       the reviewer's tags + sidebar order on the home page, v2 (separate from plan facts, so lavish-meta never clobbers them)
  *   exports/<key>/         the plan's Markdown handed over by the page, and temp files for PDF rendering
  *
  * <key> is sha256(realpath of the artifact).slice(0, 16), the same key the Lavish server uses.
@@ -244,91 +244,108 @@ export function progressSummary(reg, prs = [], limit = 20) {
   return { latest, pct, count: entries.length, entries: entries.slice(-limit) };
 }
 
-/* ── home layout: the reviewer's folders on the home page ───────────────── */
-/* Separate from registry.json on purpose: lavish-meta rewrites plan facts and must never be able to clobber folders.
- * { folders: { fid: {name, parent, createdAt} }, plans: { key: fid }, updatedAt }. parent "" = the root. */
+/* ── home layout: the reviewer's tags and sidebar order on the home page ───── */
+/* Separate from registry.json on purpose: lavish-meta rewrites plan facts and must never be able to clobber this.
+ * v2 (plan 2026-09-05, D9): { version: 2, tags: { tid: {name, createdAt} }, plans: { key: [tid, …] }, projectOrder: [project, …],
+ * planOrder: { project: [key, …] }, updatedAt }. A v1 file ({ folders, plans: {key: fid} }) migrates on first read: every folder
+ * becomes a tag of the same name and every filed plan gets that tag; the v1 file is kept beside it as home-layout.json.v1.bak. */
 export const layoutPath = () => join(stateDir, "home-layout.json");
-const EMPTY_LAYOUT = () => ({ folders: {}, plans: {}, updatedAt: "" });
+const EMPTY_LAYOUT = () => ({ version: 2, tags: {}, plans: {}, projectOrder: [], planOrder: {}, updatedAt: "" });
+const TID_RE = /^[a-z0-9]{6,24}$/, KEY_RE = /^[0-9a-f]{16}$/;
+/** v1 → v2 in memory (pure): folders become tags, nested folders flatten to their own name, a filed plan gets its folder's tag. */
+export function migrateLayoutV1(v1) {
+  const out = EMPTY_LAYOUT();
+  const folders = v1 && v1.folders && typeof v1.folders === "object" ? v1.folders : {};
+  for (const [fid, f] of Object.entries(folders)) if (f && typeof f === "object" && TID_RE.test(fid)) out.tags[fid] = { name: String(f.name || "Untitled"), createdAt: String(f.createdAt || "") };
+  for (const [key, fid] of Object.entries(v1 && v1.plans && typeof v1.plans === "object" ? v1.plans : {})) if (KEY_RE.test(key) && typeof fid === "string" && out.tags[fid]) out.plans[key] = [fid];
+  return out;
+}
 export function readLayout(path = layoutPath()) {
   const v = readJson(path, null);
   if (!v || typeof v !== "object") return EMPTY_LAYOUT();
-  const folders = {};
-  for (const [fid, f] of Object.entries(v.folders && typeof v.folders === "object" ? v.folders : {})) if (f && typeof f === "object" && /^[a-z0-9]{6,24}$/.test(fid)) folders[fid] = { name: String(f.name || "Untitled"), parent: typeof f.parent === "string" && v.folders[f.parent] ? f.parent : "", createdAt: String(f.createdAt || "") };
-  const plans = {};
-  for (const [key, fid] of Object.entries(v.plans && typeof v.plans === "object" ? v.plans : {})) if (typeof fid === "string" && folders[fid]) plans[key] = fid;
-  return { folders, plans, updatedAt: String(v.updatedAt || "") };
+  if (!v.version && v.folders) {
+    const migrated = migrateLayoutV1(v);
+    try { writeFileSync(`${path}.v1.bak`, JSON.stringify(v, null, 2)); writeLayout(migrated, path); } catch { /* read-only: serve the migrated view anyway */ }
+    return migrated;
+  }
+  const out = EMPTY_LAYOUT();
+  for (const [tid, t] of Object.entries(v.tags && typeof v.tags === "object" ? v.tags : {})) if (t && typeof t === "object" && TID_RE.test(tid)) out.tags[tid] = { name: String(t.name || "Untitled"), createdAt: String(t.createdAt || "") };
+  for (const [key, list] of Object.entries(v.plans && typeof v.plans === "object" ? v.plans : {})) { if (!KEY_RE.test(key)) continue; const tids = [...new Set((Array.isArray(list) ? list : [list]).filter((t) => typeof t === "string" && out.tags[t]))]; if (tids.length) out.plans[key] = tids; }
+  out.projectOrder = Array.isArray(v.projectOrder) ? [...new Set(v.projectOrder.filter((x) => typeof x === "string" && x))] : [];
+  for (const [project, keys] of Object.entries(v.planOrder && typeof v.planOrder === "object" ? v.planOrder : {})) if (Array.isArray(keys)) out.planOrder[project] = [...new Set(keys.filter((k) => KEY_RE.test(k)))];
+  out.updatedAt = String(v.updatedAt || "");
+  return out;
 }
 export function writeLayout(layout, path = layoutPath()) {
-  const out = { folders: layout.folders || {}, plans: layout.plans || {}, updatedAt: new Date().toISOString() };
+  const out = { version: 2, tags: layout.tags || {}, plans: layout.plans || {}, projectOrder: layout.projectOrder || [], planOrder: layout.planOrder || {}, updatedAt: new Date().toISOString() };
   writeJsonAtomic(path, out);
   return out;
 }
-const newFid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+const newTid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const cleanName = (name) => String(name || "").replace(/\s+/g, " ").trim().slice(0, 80);
-/** Every folder id from fid down (fid included). */
-export function folderDescendants(layout, fid) {
-  const out = new Set([fid]);
-  let grew = true;
-  while (grew) { grew = false; for (const [id, f] of Object.entries(layout.folders)) if (!out.has(id) && out.has(f.parent)) { out.add(id); grew = true; } }
-  return out;
-}
-export function createFolder(name, parent = "", path = layoutPath()) {
+export function createTag(name, path = layoutPath()) {
   const layout = readLayout(path);
-  const n = cleanName(name); if (!n) throw new Error("a folder needs a name");
-  if (parent && !layout.folders[parent]) throw new Error("no such parent folder");
-  const fid = newFid();
-  layout.folders[fid] = { name: n, parent: parent || "", createdAt: new Date().toISOString() };
+  const n = cleanName(name); if (!n) throw new Error("a tag needs a name");
+  const dup = Object.entries(layout.tags).find(([, t]) => t.name.toLowerCase() === n.toLowerCase());
+  if (dup) return { tid: dup[0], layout, existed: true };
+  const tid = newTid();
+  layout.tags[tid] = { name: n, createdAt: new Date().toISOString() };
   writeLayout(layout, path);
-  return { fid, layout };
+  return { tid, layout, existed: false };
 }
-export function renameFolder(fid, name, path = layoutPath()) {
+export function renameTag(tid, name, path = layoutPath()) {
   const layout = readLayout(path);
-  if (!layout.folders[fid]) throw new Error("no such folder");
-  const n = cleanName(name); if (!n) throw new Error("a folder needs a name");
-  layout.folders[fid].name = n;
+  if (!layout.tags[tid]) throw new Error("no such tag");
+  const n = cleanName(name); if (!n) throw new Error("a tag needs a name");
+  layout.tags[tid].name = n;
   return writeLayout(layout, path);
 }
-/** Move a folder under another (or "" for the root). A folder can never land inside itself or its own descendant. */
-export function moveFolder(fid, parent = "", path = layoutPath()) {
+/** Delete a tag: it comes off every plan; nothing else changes. */
+export function deleteTag(tid, path = layoutPath()) {
   const layout = readLayout(path);
-  if (!layout.folders[fid]) throw new Error("no such folder");
-  if (parent && !layout.folders[parent]) throw new Error("no such parent folder");
-  if (parent && folderDescendants(layout, fid).has(parent)) throw new Error("a folder cannot move under its own descendant");
-  layout.folders[fid].parent = parent || "";
+  if (!layout.tags[tid]) throw new Error("no such tag");
+  delete layout.tags[tid];
+  for (const [key, list] of Object.entries(layout.plans)) { const rest = list.filter((t) => t !== tid); if (rest.length) layout.plans[key] = rest; else delete layout.plans[key]; }
   return writeLayout(layout, path);
 }
-/** Delete a folder: its child folders and its plans move to its parent (the root when it had none). Nothing is lost. */
-export function deleteFolder(fid, path = layoutPath()) {
+/** Put a tag on a plan (on = true) or take it off (on = false). */
+export function tagPlan(key, tid, on = true, path = layoutPath()) {
   const layout = readLayout(path);
-  const f = layout.folders[fid]; if (!f) throw new Error("no such folder");
-  for (const [id, child] of Object.entries(layout.folders)) if (child.parent === fid) child.parent = f.parent;
-  for (const [key, where] of Object.entries(layout.plans)) if (where === fid) { if (f.parent) layout.plans[key] = f.parent; else delete layout.plans[key]; }
-  delete layout.folders[fid];
+  if (!KEY_RE.test(String(key))) throw new Error("bad plan key");
+  if (!layout.tags[tid]) throw new Error("no such tag");
+  const cur = layout.plans[key] || [];
+  const next = on ? [...new Set([...cur, tid])] : cur.filter((t) => t !== tid);
+  if (next.length) layout.plans[key] = next; else delete layout.plans[key];
   return writeLayout(layout, path);
 }
-/** Put a plan in a folder ("" = unfiled). */
-export function filePlan(key, fid = "", path = layoutPath()) {
+/** The sidebar's project order (names the page knows; unknown names are kept so a project that is empty today keeps its place). */
+export function setProjectOrder(names, path = layoutPath()) {
   const layout = readLayout(path);
-  if (!/^[0-9a-f]{16}$/.test(String(key))) throw new Error("bad plan key");
-  if (fid && !layout.folders[fid]) throw new Error("no such folder");
-  if (fid) layout.plans[key] = fid; else delete layout.plans[key];
+  layout.projectOrder = [...new Set((Array.isArray(names) ? names : []).map((x) => cleanName(x)).filter(Boolean))];
   return writeLayout(layout, path);
 }
-/** Nested tree for the sidebar: [{id, name, parent, children: [...]}], siblings by name. An orphaned parent means root. */
-export function folderTree(layout) {
-  const nodes = {};
-  for (const [id, f] of Object.entries(layout.folders)) nodes[id] = { id, name: f.name, parent: layout.folders[f.parent] ? f.parent : "", createdAt: f.createdAt, children: [] };
-  const roots = [];
-  for (const n of Object.values(nodes)) (n.parent ? nodes[n.parent].children : roots).push(n);
-  const sortRec = (list) => { list.sort((a, b) => a.name.localeCompare(b.name)); for (const n of list) sortRec(n.children); return list; };
-  return sortRec(roots);
+/** The order of plans inside one project's list. */
+export function setPlanOrder(project, keys, path = layoutPath()) {
+  const layout = readLayout(path);
+  const p = cleanName(project); if (!p) throw new Error("a project name is needed");
+  const list = [...new Set((Array.isArray(keys) ? keys : []).filter((k) => KEY_RE.test(String(k))))];
+  if (list.length) layout.planOrder[p] = list; else delete layout.planOrder[p];
+  return writeLayout(layout, path);
 }
-/** Breadcrumb from the root down to fid: [{id, name}, …]; [] for the root or an unknown id. */
-export function folderPath(layout, fid) {
-  const out = []; const seen = new Set();
-  let cur = fid;
-  while (cur && layout.folders[cur] && !seen.has(cur)) { seen.add(cur); out.unshift({ id: cur, name: layout.folders[cur].name }); cur = layout.folders[cur].parent; }
-  return out;
+/** [{id, name}] of a plan's tags, by name. */
+export function tagsOf(layout, key) {
+  return (layout.plans[key] || []).filter((t) => layout.tags[t]).map((t) => ({ id: t, name: layout.tags[t].name })).sort((a, b) => a.name.localeCompare(b.name));
+}
+/** Tags as a list for the sidebar and menus: [{id, name, count}] by name; count = plans among `keys` (or every plan in the file). */
+export function tagList(layout, keys = null) {
+  const counts = {};
+  for (const [key, list] of Object.entries(layout.plans)) { if (keys && !keys.has(key)) continue; for (const t of list) counts[t] = (counts[t] || 0) + 1; }
+  return Object.entries(layout.tags).map(([id, t]) => ({ id, name: t.name, count: counts[id] || 0 })).sort((a, b) => a.name.localeCompare(b.name));
+}
+/** `items` in the remembered order: those named in `order` first (in that order), the rest as given. */
+export function applyOrder(items, order, keyOf = (x) => x) {
+  const rank = new Map((order || []).map((k, i) => [k, i]));
+  return items.map((x, i) => [x, rank.has(keyOf(x)) ? rank.get(keyOf(x)) : order.length + i]).sort((a, b) => a[1] - b[1]).map((x) => x[0]);
 }
 
 /* ── versions: snapshots of the artifact file ────────────────────────────── */

@@ -9,7 +9,7 @@
  *   /                         every plan (Drive-style, plan 2026-09-05): sidebar (All plans · Active now · projects with their plans nested ·
  *                             tags), filter popovers, one table per project (Plan · Plan status · Build · Session · Modified · Added · Actions,
  *                             more from the Columns button), 5 rows per project on the home view + Show more
- *   /?folder=<fid>|project=<p>|agent=…&stage=…&plan=…&prio=…&status=…   one tag, one project, or a filtered list
+ *   /?tag=<tid>|project=<p>|agent=…&stage=…&plan=…&prio=…&status=…   one tag, one project, or a filtered list
  *   /session/<key>            the plan page: stage line, Agent block + plan-status form, Resume + New session, Sessions, History,
  *                             versions (view / diff / continue from), commits, export, the conversation with private comments in place
  *   /session/<key>.md         the transcript as Markdown (download)
@@ -23,11 +23,16 @@
  *   POST /connect/<key>?new=1 a NEW session in tmux with a prompt that opens and polls the plan (Claude or Codex)
  *   POST /effort/<key>        type /effort <level> into the plan's Claude terminal (only when idle), show the pane's reply
  *   POST /scan/<key>          Find sessions: the bounded transcript scan (D11) for this plan
- *   POST /restore/<key>/<n>   put version n back onto disk (the replaced file is snapshotted first)
+ *   /version/<key>/<n>/       a saved version in an iframe + the comments, messages, replies and private notes of its window; /raw = the snapshot itself
+ *   POST /restore/<key>/<n>[?then=resume|new]   put version n back onto disk (the replaced file is snapshotted first), then optionally Resume / New session
+ *   POST /restart/<key>       D10: refuse if the agent is live; else end the Lavish session, mark its tabs to close, start a new agent on the plan
+ *   POST /rename/<key>        rewrite the plan file's <title> (snapshotted before and after)
+ *   PUT  /api/presence/<key>  {tab, title}: a Lavish tab's 10 s ping → {close: bool}; POST ?gone=1&tab= on unload; GET the open tabs
+ *   POST /end/<key>?close=1   end the Lavish session and tell every tab of the plan to close itself; POST /tabs/<key>/close keeps the newest tab
  *   POST /open|end/<key>      resume / end the Lavish session
  *   POST /status/<key>        plan status · add PR · summary · progress (forms)
- *   POST /folders, /folders/<fid>, /move/<key>   folder forms (create · rename/move/delete · file a plan)
- *   /api/layout               GET the folders · PUT {op: create|rename|move|delete|file, …} (drag and drop)
+ *   POST /tags, /tags/<tid>, /tag/<key>   tag forms (create · rename/delete · toggle a tag on a plan)
+ *   /api/layout               GET tags + counts · PUT {op: tag|untag|tag-create|tag-rename|tag-delete|order-projects|order-plans} (drag and drop)
  *   /api/notes/<key>          GET/PUT the reviewer's private comments (CORS for the Lavish chrome on :4387)
  *   /api/notes/<key>/files    PUT ?name= (raw image body) stores a private attachment; GET /:id serves it; DELETE /:id
  *   /api/registry/<key>       GET/POST plan status / PRs / summary · POST …/refresh-prs
@@ -35,7 +40,7 @@
  *   /api/queue/<key>          GET/PUT/DELETE the rail's mirror of unsent comments, image copies and the card draft
  *   /api/export/<key>/plan.md PUT the page's own Markdown of the plan (text/plain), used by the md export
  *   /export/<key>?format=html|pdf|md&include=chat,comments,notes[&plan=0][&inline=1]
- *   /api/sessions             GET the plan list as JSON, with folder and agent {provider,id,state,name,terminal} per plan
+ *   /api/sessions             GET the plan list as JSON, with tags, tabs, build and agent {provider,id,state,name,model,terminal} per plan
  *   /health
  *
  * Background: every 20 s it snapshots changed artifacts (versions); every 30 min it refreshes PR states through `gh`;
@@ -52,11 +57,11 @@ import {
   readVersionIndex, versionPath, snapshotVersion, extractText, diffLines, readHead, extractPrMentions,
   gitInfo, gitLogForFile, gitStatusForFile, ghPrView, sha,
   readQueue, writeQueue, deleteQueue, stageOf, subLabelOf, progressSummary, STAGES, STAGE_LABELS, decodeEntities,
-  readLayout, createFolder, renameFolder, moveFolder, deleteFolder, filePlan, folderTree, folderPath, folderDescendants, agentLabel,
+  readLayout, createTag, renameTag, deleteTag, tagPlan, setProjectOrder, setPlanOrder, tagsOf, tagList, applyOrder, agentLabel,
 } from "./lavish-lib.mjs";
 import {
   liveClaudeSessions, liveCodexThreads, listTmux, listClients, agentState, resumeAgent, startNewAgent, sendText, capturePane, paneIdle,
-  scanTranscriptsMany, scanTranscripts, readTerminals, LAUNCH_OPTIONS, defaultNewPrompt, tmuxName, CLAUDE_BIN, CODEX_BIN, TMUX_BIN,
+  scanTranscriptsMany, scanTranscripts, readTerminals, LAUNCH_OPTIONS, defaultNewPrompt, tmuxName, CLAUDE_BIN, CODEX_BIN, TMUX_BIN, sessionInfoOf,
 } from "./lavish-agent.mjs";
 
 const PORT = Number(process.env.LAVISH_HOME_PORT || 4388);
@@ -109,6 +114,23 @@ async function refreshLive(force = false) {
   return liveCache;
 }
 
+/* ── presence: which Lavish tabs are open on each plan (the rail pings PUT /api/presence/<key> every 10 s; D6) ── */
+const PRESENCE_TTL_MS = 30_000, PRESENCE_MARK_TTL_MS = 5 * 60_000;
+const presence = new Map(); // key → Map(tab → { at: ms, title, close: "" | reason })
+function presenceTabs(key) {
+  const m = presence.get(key); if (!m) return [];
+  const now = Date.now();
+  for (const [tab, t] of m) if (now - t.at > (t.close ? PRESENCE_MARK_TTL_MS : PRESENCE_TTL_MS)) m.delete(tab);
+  return [...m.entries()].map(([tab, t]) => ({ tab, ...t }));
+}
+const presenceCount = (key) => presenceTabs(key).filter((t) => !t.close).length;
+/** Mark every tab of a plan (but `keep`) to close on its next ping. Returns how many were marked. */
+function markTabs(key, reason, { keep = "" } = {}) {
+  let n = 0;
+  for (const t of presenceTabs(key)) if (t.tab !== keep && !t.close) { presence.get(key).get(t.tab).close = reason; n++; }
+  return n;
+}
+
 /* ── data ─────────────────────────────────────────────────────────────── */
 function loadSessions() {
   const state = readJson(join(stateDir, "state.json"), { sessions: {} });
@@ -129,7 +151,6 @@ function loadSessions() {
     const updated = new Date(s.updated_at || 0);
     const userSent = history.filter((h) => h.role === "user").length || chat.filter((c) => c.role === "user").length;
     const agentMsgs = chat.filter((c) => c.role === "agent").length;
-    const fid = layout.plans[key] || "";
     const birth = (() => { try { return resolved ? statSync(resolved).birthtime.toISOString() : ""; } catch { return ""; } })();
     const added = [versions[0]?.at, history[0]?.at, birth].filter(Boolean).sort()[0] || "";
     const session = {
@@ -145,10 +166,12 @@ function loadSessions() {
       versions, versionCount: versions.length,
       stale: (s.status !== "ended") && (Date.now() - updated.getTime()) / 864e5 > STALE_DAYS,
       chat, history, head, reg,
-      folder: fid, folderPath: fid ? folderPath(layout, fid) : [], added,
+      tags: tagsOf(layout, key), added, tabs: presenceCount(key),
       agent: agentState(reg, liveCache, liveCache.tmux),
       agents: Array.isArray(reg.agents) ? reg.agents : [],
     };
+    const info = session.agent.state === "none" ? null : sessionInfoOf(reg.agent);
+    session.agent.model = info ? info.model : ""; session.agent.startedAt = info ? info.startedAt : ""; session.agent.lastAt = info ? info.lastAt : "";
     session.plan = derivePlan(session);
     return session;
   }).sort((a, b) => b.updated - a.updated);
@@ -343,7 +366,7 @@ const COLUMNS = [
   { k: "modified", label: "Modified", w: "11%", on: true },
   { k: "added", label: "Added", w: "9%", on: true },
   { k: "actions", label: "Actions", w: "14%", on: true, fixed: true, nosort: true },
-  { k: "folder", label: "Tags", w: "12%", on: false },
+  { k: "tags", label: "Tags", w: "12%", on: false },
   { k: "priority", label: "Priority", w: "8%", on: false },
   { k: "project", label: "Project", w: "12%", on: false },
   { k: "completed", label: "Completed", w: "9%", on: false },
@@ -485,25 +508,28 @@ const CLIENT_JS = `
   function step(dir){var links=planLinks();if(!links.length)return;var cur=document.body.dataset.key||"";var i=-1;links.forEach(function(a,j){if(a.dataset.key===cur)i=j;});var j=i<0?(dir>0?0:links.length-1):(i+dir+links.length)%links.length;location.href=links[j].getAttribute("href");}
   var pb=document.getElementById("prevPlan"),nb=document.getElementById("nextPlan");if(pb)pb.addEventListener("click",function(){step(-1);});if(nb)nb.addEventListener("click",function(){step(1);});
   document.addEventListener("keydown",function(e){if(e.metaKey||e.ctrlKey||e.altKey)return;var t=e.target;if(t&&(t.tagName==="INPUT"||t.tagName==="TEXTAREA"||t.tagName==="SELECT"||t.isContentEditable))return;if(e.key==="ArrowLeft")step(-1);else if(e.key==="ArrowRight")step(1);});
-  /* drag and drop: a plan row (or a sidebar plan) onto a tag in the sidebar; PUT /api/layout */
-  var L=window.__LAYOUT||{folders:{}};
+  /* drag and drop (PUT /api/layout): a plan (row or sidebar) onto a tag = tag it; a sidebar plan onto another plan of the same project = reorder; a project onto a project = reorder */
   var dragging=null;
-  document.querySelectorAll("[data-drag]").forEach(function(el){el.addEventListener("dragstart",function(e){dragging=el.dataset.drag;e.dataTransfer.setData("text/plain",dragging);e.dataTransfer.effectAllowed="move";el.classList.add("drag");});
-    el.addEventListener("dragend",function(){el.classList.remove("drag");dragging=null;document.querySelectorAll(".nodrop,.over").forEach(function(t){t.classList.remove("nodrop");t.classList.remove("over");});});});
-  document.querySelectorAll("[data-drop]").forEach(function(t){t.addEventListener("dragover",function(e){if(!dragging||dragging.indexOf("plan:")!==0)return;e.preventDefault();e.dataTransfer.dropEffect="move";t.classList.add("over");});
+  document.querySelectorAll("[data-drag]").forEach(function(el){el.addEventListener("dragstart",function(e){dragging=el.dataset.drag;e.dataTransfer.setData("text/plain",dragging);e.dataTransfer.effectAllowed="move";el.classList.add("drag");e.stopPropagation();});
+    el.addEventListener("dragend",function(){el.classList.remove("drag");dragging=null;document.querySelectorAll(".over").forEach(function(t){t.classList.remove("over");});});});
+  function canDrop(src,target){if(!src||!target)return false;if(src.indexOf("plan:")===0)return target.indexOf("tag:")===0||(target.indexOf("planslot:")===0&&target.slice(9)!==src.slice(5));if(src.indexOf("project:")===0)return target.indexOf("project:")===0&&target!==src;return false;}
+  document.querySelectorAll("[data-drop]").forEach(function(t){t.addEventListener("dragover",function(e){if(!canDrop(dragging,t.dataset.drop))return;e.preventDefault();e.stopPropagation();e.dataTransfer.dropEffect="move";t.classList.add("over");});
     t.addEventListener("dragleave",function(){t.classList.remove("over");});
-    t.addEventListener("drop",function(e){e.preventDefault();t.classList.remove("over");var src=e.dataTransfer.getData("text/plain")||dragging;if(!src||src.indexOf("plan:")!==0)return;var target=t.dataset.drop;var fid=target.indexOf("folder:")===0?target.slice(7):"";
-      var body={op:"file",key:src.slice(5),fid:fid};
-      fetch("/api/layout",{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify(body)}).then(function(r){return r.json();}).then(function(j){if(j.error){alert(j.error);return;}L=j.layout||L;
+    t.addEventListener("drop",function(e){e.preventDefault();e.stopPropagation();t.classList.remove("over");var src=e.dataTransfer.getData("text/plain")||dragging;var target=t.dataset.drop;if(!canDrop(src,target))return;var body=null;
+      if(src.indexOf("plan:")===0&&target.indexOf("tag:")===0)body={op:"tag",key:src.slice(5),tid:target.slice(4)};
+      else if(src.indexOf("plan:")===0){var wa=document.querySelector('.side .navwrap[data-drop="planslot:'+src.slice(5)+'"]'),wb=t;if(!wa||wa.parentNode!==wb.parentNode)return;wa.parentNode.insertBefore(wa,wb);body={op:"order-plans",project:wa.parentNode.dataset.proj,keys:[].map.call(wa.parentNode.querySelectorAll(".navwrap"),function(w){return w.dataset.drop.slice(9);})};}
+      else{var pa=document.querySelector('details.proj[data-proj="'+CSS.escape(src.slice(8))+'"]'),pb=t.closest("details.proj");if(!pa||!pb||pa===pb)return;pb.parentNode.insertBefore(pa,pb);body={op:"order-projects",names:[].map.call(document.querySelectorAll("details.proj"),function(d){return d.dataset.proj;})};}
+      fetch("/api/layout",{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify(body)}).then(function(r){return r.json();}).then(function(j){if(j.error){alert(j.error);return;}
         Object.keys(j.counts||{}).forEach(function(id){document.querySelectorAll('[data-count="'+id+'"]').forEach(function(n){n.textContent=j.counts[id];});});
-        var tr=document.querySelector('tr[data-key="'+body.key+'"]');if(tr){var cell=tr.querySelector('td[data-col="folder"]');if(cell)cell.innerHTML=j.folderHtml||"";var view=document.body.dataset.view||"";if(view.indexOf("folder:")===0&&view!==("folder:"+fid))tr.style.display="none";}
-      }).catch(function(){alert("Could not move: the home page did not answer.");});});});
+        if(body.op==="tag"){var tr=document.querySelector('tr[data-key="'+body.key+'"]');if(tr){var cell=tr.querySelector('td[data-col="tags"]');if(cell)cell.innerHTML=j.tagsHtml||"";}}
+        else location.reload();
+      }).catch(function(){alert("Could not save: the home page did not answer.");});});});
 })();`;
 const FONTS = `<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">`;
-const page = (title, crumb, body, serverUp, { pills = "", sidebar = "", layout = null, view = "", key = "" } = {}) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title>${FONTS}<style>${CSS}</style><script>try{var t=localStorage.getItem("lavish-home:theme");if(t)document.documentElement.setAttribute("data-theme",t);if(localStorage.getItem("lavish-home:side-hidden")==="1"||localStorage.getItem("lavish-home:side-hidden")==='"1"')document.documentElement.classList.add("nos");}catch(e){}</script></head><body${view ? ` data-view="${esc(view)}"` : ""}${key ? ` data-key="${esc(key)}"` : ""}>
+const page = (title, crumb, body, serverUp, { pills = "", sidebar = "", layout = null, view = "", key = "", wide = false } = {}) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title>${FONTS}<style>${CSS}</style><script>try{var t=localStorage.getItem("lavish-home:theme");if(t)document.documentElement.setAttribute("data-theme",t);if(localStorage.getItem("lavish-home:side-hidden")==="1"||localStorage.getItem("lavish-home:side-hidden")==='"1"')document.documentElement.classList.add("nos");}catch(e){}</script></head><body${view ? ` data-view="${esc(view)}"` : ""}${key ? ` data-key="${esc(key)}"` : ""}>
 <div class="top">${sidebar ? `<button class="tbtn" id="sideShow" type="button" title="Show the sidebar">☰</button>` : ""}<a class="logo" href="/">Lavish</a><span class="crumb">${esc(crumb)}</span><span class="sp"></span>${sidebar && view ? '<div class="search"><span aria-hidden="true">⌕</span><input id="q" type="search" placeholder="Search plans" autocomplete="off"></div>' : ""}${pills}<button class="tbtn" id="themeToggle" type="button" title="Light / dark (follows the system until you pick; saved in this browser)" aria-label="Toggle theme">◐</button><span class="pill lv-pill ${serverUp ? "on" : "off"}" title="The Lavish server on :${process.env.LAVISH_AXI_PORT || 4387}"><span class="ld"></span>lavish ${serverUp ? "up" : "down"}</span></div>
-${sidebar ? `<div class="shell"><aside class="side">${sidebar}<div class="rzs" title="Drag to resize the sidebar"></div></aside><main>${body}</main></div>` : `<main style="max-width:1280px;margin:0 auto">${body}</main>`}
-<script>window.__LAYOUT=${JSON.stringify(layout ? { folders: layout.folders } : { folders: {} }).replace(/<\//g, "<\\/")};window.__COLS=${JSON.stringify(COLUMNS.map((c) => ({ k: c.k, on: c.on })))};${CLIENT_JS}</script></body></html>`;
+${sidebar ? `<div class="shell"><aside class="side">${sidebar}<div class="rzs" title="Drag to resize the sidebar"></div></aside><main>${body}</main></div>` : `<main style="${wide ? "padding:0" : "max-width:1280px;margin:0 auto"}">${body}</main>`}
+<script>window.__LAYOUT=${JSON.stringify(layout ? { tags: layout.tags } : { tags: {} }).replace(/<\//g, "<\\/")};window.__COLS=${JSON.stringify(COLUMNS.map((c) => ({ k: c.k, on: c.on })))};${CLIENT_JS}</script></body></html>`;
 const errorPage = (title, message, { back = "/", extra = "" } = {}, serverUp = true) => page(title, title, `<div class="errpage"><h1>${esc(title)}</h1><p>${esc(message)}</p>${extra}<p class="meta"><a class="a" href="${esc(back)}">← Back</a></p></div>`, serverUp);
 
 function planChip(plan) {
@@ -537,48 +563,47 @@ function agentCell(s) {
     top = `<span class="ag ${a.state}${a.source === "scan" ? " scan" : ""}${a.guessed ? " guessed" : ""}" title="${esc(title)}">${dot}${glyph(a.provider)}<span class="name">${esc(a.name)}</span></span>`;
   }
   const bits = [];
-  const model = modelName((s.reg.launch || {}).model);
+  const model = agentModel(s);
   if (a.state !== "none" && model) bits.push(model);
   if (a.state !== "none") bits.push(agentPlace(a));
+  if (s.tabs) bits.push(`${s.tabs} tab${s.tabs === 1 ? "" : "s"}`);
   if (!s.exists) bits.push(`<span class="st orphan">orphaned</span>`);
   else if (s.status === "ended") bits.push("lavish ended");
   else if (s.stale) bits.push("lavish stale");
   else if (s.pending) bits.push(`${s.pending} pending`);
   return `<div class="two">${top}${bits.length ? `<span class="lv">${bits.map((b) => (b.startsWith("<") ? b : esc(b))).join(" · ")}</span>` : ""}</div>`;
 }
-const folderCellHtml = (s) => (s.folderPath.length ? `<span class="tags">${s.folderPath.map((f) => `<a class="tg1" href="/?folder=${esc(f.id)}">${esc(f.name)}</a>`).join("")}</span>` : `<span class="num">–</span>`);
-/** counts per folder (its plans and its descendants' plans) */
-function folderCounts(layout, sessions) {
-  const counts = {};
-  for (const s of sessions) { if (!s.folder) continue; let cur = s.folder; const seen = new Set(); while (cur && layout.folders[cur] && !seen.has(cur)) { seen.add(cur); counts[cur] = (counts[cur] || 0) + 1; cur = layout.folders[cur].parent; } }
-  return counts;
-}
+const tagsCellHtml = (s) => (s.tags.length ? `<span class="tags">${s.tags.map((t) => `<a class="tg1" href="/?tag=${esc(t.id)}">${esc(t.name)}</a>`).join("")}</span>` : `<span class="num">–</span>`);
+/** The model a session is on, for display: the transcript's, else the remembered launch choice. */
+const agentModel = (s) => modelName(s.agent.model) || modelName((s.reg.launch || {}).model);
 /** The sidebar shared by the index and the plan page: All plans · Active now · projects with their plans nested · tags. */
-function renderSidebar(sessions, layout, { view = "", agent = "", current = "", counts = {} } = {}) {
+/** Projects in sidebar order: the dragged order first, then by latest activity (sessions are newest first). */
+const orderedProjects = (sessions, layout) => applyOrder([...new Set(sessions.map((s) => s.project))], layout.projectOrder);
+const orderedPlans = (list, layout, project) => applyOrder(list, layout.planOrder[project] || [], (s) => s.key);
+function renderSidebar(sessions, layout, { view = "", agent = "", current = "" } = {}) {
   const live = sessions.filter((s) => !["retired", "superseded"].includes(s.plan.status));
-  const projects = [...new Set(sessions.map((s) => s.project))]; // sessions are newest first, so projects follow their latest activity, like the tables
-  const projNav = projects.map((p) => {
-    const plans = live.filter((s) => s.project === p);
-    return `<details class="proj" open data-proj="${esc(p)}"><summary class="nav ${view === `project:${p}` ? "on" : ""}" data-drag="project:${esc(p)}" draggable="true" title="${esc(p)}: click to collapse; drag to reorder">${ICON.folder}${ICON.folderOpen}<span class="t">${esc(p)}</span><span class="n">${plans.length}</span></summary>
-      ${plans.map((s) => `<div class="navwrap hc"><a class="nav plan ${current === s.key ? "on" : ""}" href="/session/${s.key}" data-key="${s.key}" data-drag="plan:${s.key}" draggable="true">${esc(s.title)}</a>${hoverCard(s)}</div>`).join("")}
+  const projNav = orderedProjects(sessions, layout).map((p) => {
+    const plans = orderedPlans(live.filter((s) => s.project === p), layout, p);
+    return `<details class="proj" open data-proj="${esc(p)}"><summary class="nav ${view === `project:${p}` ? "on" : ""}" data-drag="project:${esc(p)}" data-drop="project:${esc(p)}" draggable="true" title="${esc(p)}: click to collapse; drag onto another project to reorder">${ICON.folder}${ICON.folderOpen}<span class="t">${esc(p)}</span><span class="n">${plans.length}</span></summary>
+      ${plans.map((s) => `<div class="navwrap hc" data-drop="planslot:${s.key}"><a class="nav plan ${current === s.key ? "on" : ""}" href="/session/${s.key}" data-key="${s.key}" data-drag="plan:${s.key}" draggable="true">${esc(s.title)}</a>${hoverCard(s)}</div>`).join("")}
       ${plans.length > 5 ? `<button class="more" type="button">Show more</button>` : ""}</details>`;
   }).join("");
-  const tags = Object.entries(layout.folders).sort((a, b) => a[1].name.localeCompare(b[1].name));
+  const tags = tagList(layout, new Set(sessions.map((s) => s.key)));
   return `<div class="shead"><button id="sideHide" type="button" title="Hide the sidebar">${ICON.hide}</button><span class="sp"></span><button id="prevPlan" type="button" title="Previous plan (←)">←</button><button id="nextPlan" type="button" title="Next plan (→)">→</button></div>
-  <a class="nav ${view === "all" ? "on" : ""}" href="/" data-drop="root">${ICON.all}<span class="t">All plans</span><span class="n">${sessions.length}</span></a>
+  <a class="nav ${view === "all" ? "on" : ""}" href="/">${ICON.all}<span class="t">All plans</span><span class="n">${sessions.length}</span></a>
   <a class="nav ${agent === "any-active" ? "on" : ""}" href="/?agent=any-active">${ICON.active}<span class="t">Active now</span><span class="n">${sessions.filter((s) => s.agent.state === "active").length}</span></a>
   <h4>Projects</h4>${projNav}
-  <h4>Tags</h4>${tags.map(([id, f]) => `<a class="nav ${view === `folder:${id}` ? "on" : ""}" href="/?folder=${esc(id)}" data-drop="folder:${esc(id)}" title="Drop a plan here to tag it">${ICON.tag}<span class="t">${esc(f.name)}</span><span class="n" data-count="${esc(id)}">${counts[id] || 0}</span></a>`).join("") || '<p class="meta" style="margin:2px 10px 6px">None yet.</p>'}
-  <form class="newf" method="post" action="/folders"><input name="name" placeholder="New tag" required maxlength="80" aria-label="New tag"><button type="submit" title="Create the tag">+</button></form>`;
+  <h4>Tags</h4>${tags.map((t) => `<a class="nav ${view === `tag:${t.id}` ? "on" : ""}" href="/?tag=${esc(t.id)}" data-drop="tag:${esc(t.id)}" title="Drop a plan here to tag it">${ICON.tag}<span class="t">${esc(t.name)}</span><span class="n" data-count="${esc(t.id)}">${t.count}</span></a>`).join("") || '<p class="meta" style="margin:2px 10px 6px">None yet. Create one below, then drag plans onto it.</p>'}
+  <form class="newf" method="post" action="/tags"><input name="name" placeholder="New tag" required maxlength="80" aria-label="New tag"><button type="submit" title="Create the tag">+</button></form>`;
 }
 
 function renderIndex(sessions, q, serverUp, layout) {
-  const folder = q.get("folder") || "", project = q.get("project") || "";
+  const tag = q.get("tag") || "", project = q.get("project") || "";
   const status = q.get("status") || "", plan = q.get("plan") || "", prio = q.get("prio") || "", stage = q.get("stage") || "", agent = q.get("agent") || "";
   const showRetired = plan === "retired" || plan === "superseded" || stage === "parked";
-  const counts = folderCounts(layout, sessions);
-  const inFolder = folder ? folderDescendants(layout, folder) : null;
-  const shown = sessions.filter((s) => (!folder || (s.folder && inFolder.has(s.folder)))
+  const tags = tagList(layout, new Set(sessions.map((s) => s.key)));
+  const tagName = tag ? layout.tags[tag]?.name || "Tag" : "";
+  const shown = sessions.filter((s) => (!tag || s.tags.some((t) => t.id === tag))
     && (!project || s.project === project)
     && (!status || (status === "orphan" ? !s.exists : status === "stale" ? s.stale : s.status === status))
     && (!agent || (agent === "terminal" ? s.agent.state === "active" && s.agent.terminal : agent === "active" ? s.agent.state === "active" && !s.agent.terminal : agent === "any-active" ? s.agent.state === "active" : s.agent.state === agent))
@@ -586,11 +611,11 @@ function renderIndex(sessions, q, serverUp, layout) {
     && (!prio || s.plan.priority === prio)
     && (!stage || s.plan.stage === stage)
     && (showRetired || !["retired", "superseded"].includes(s.plan.status)));
-  const current = { ...(folder ? { folder } : {}), ...(project ? { project } : {}), ...(status ? { status } : {}), ...(agent ? { agent } : {}), ...(plan ? { plan } : {}), ...(prio ? { prio } : {}), ...(stage ? { stage } : {}) };
+  const current = { ...(tag ? { tag } : {}), ...(project ? { project } : {}), ...(status ? { status } : {}), ...(agent ? { agent } : {}), ...(plan ? { plan } : {}), ...(prio ? { prio } : {}), ...(stage ? { stage } : {}) };
   const keep = (k, v, drop = []) => { const c = { ...current, [k]: v }; for (const d of drop) delete c[d]; return new URLSearchParams(c).toString().replace(/[^=&]+=(&|$)/g, "").replace(/&$/, ""); };
   const filtered = Boolean(status || agent || plan || prio || stage);
-  const home = !folder && !project && !filtered;
-  const view = folder ? `folder:${folder}` : project ? `project:${project}` : filtered ? "filtered" : "all";
+  const home = !tag && !project && !filtered;
+  const view = tag ? `tag:${tag}` : project ? `project:${project}` : filtered ? "filtered" : "all";
   // Drive-style filter buttons: each opens a popover of today's chips with the same query keys; nothing moves when one opens.
   const FILTERS = [
     { k: "agent", label: "Agent", cur: agent, opts: [["", "any"], ["none", "not connected"], ["active", "active in an editor"], ["terminal", "in a terminal"], ["any-active", "any active"], ["ended", "ended"]] },
@@ -598,22 +623,22 @@ function renderIndex(sessions, q, serverUp, layout) {
     { k: "plan", label: "Plan", cur: plan, opts: [["", "any"], ["unworked", "unworked"], ...STATUSES.map((p) => [p, (STATUS_WORDS[p] || [p])[0]])] },
     { k: "prio", label: "Priority", cur: prio, opts: [["", "any"], ...PRIORITIES.map((p) => [p, p])] },
     { k: "status", label: "Lavish", cur: status, opts: [["", "any"], ["open", "open"], ["ended", "ended"], ["stale", "stale"], ["orphan", "orphaned"]] },
-    { k: "folder", label: "Tags", cur: folder, opts: [["", "any"], ...Object.entries(layout.folders).sort((a, b) => a[1].name.localeCompare(b[1].name)).map(([id, f]) => [id, f.name])] },
+    { k: "tag", label: "Tags", cur: tag, opts: [["", "any"], ...tags.map((t) => [t.id, t.name])] },
   ];
   const fbtn = (f) => { const curLabel = (f.opts.find((o) => o[0] === f.cur) || [])[1] || ""; return `<details class="fbtn ${f.cur ? "on" : ""}"><summary>${esc(f.label)}${f.cur ? ` · ${esc(curLabel)}` : ""} <span class="ch">▾</span></summary><div class="pop">${f.opts.map(([v, label]) => `<a class="${f.cur === v ? "on" : ""}" href="/?${keep(f.k, v)}">${esc(label)}</a>`).join("")}</div></details>`; };
   const colsBtn = `<details class="fbtn" style="margin-left:auto"><summary>Columns <span class="ch">▾</span></summary><div class="pop right" id="colsPop"><div class="h">Shown</div>${COLUMNS.map((c) => `<label class="${c.fixed ? "fixed" : ""}"><input type="checkbox" value="${c.k}"${c.on ? " checked" : ""}${c.fixed ? " disabled" : ""}> ${esc(c.label)}</label>`).join("")}</div></details>`;
   const fbar = `<div class="fbar">${FILTERS.map(fbtn).join("")}${Object.keys(current).length ? `<a class="a" href="/" style="font-size:12.5px">Clear</a>` : ""}${colsBtn}</div>`;
   const back = encodeURIComponent("/?" + new URLSearchParams(current).toString());
-  const sidebar = renderSidebar(sessions, layout, { view, agent, counts });
-  const crumbs = folder ? `<div class="crumbs"><a href="/">All plans</a> › <b>${esc(layout.folders[folder]?.name || "Tag")}</b></div>` : project ? `<div class="crumbs"><a href="/">All plans</a> › <b>${esc(project)}</b></div>` : `<div class="crumbs"><b>All plans</b>${filtered ? " <span>· filtered</span>" : ""}</div>`;
-  const tagRow = folder ? `<p class="meta" style="margin:0 0 8px">${counts[folder] || 0} plan${counts[folder] === 1 ? "" : "s"} · <form class="inline" method="post" action="/folders/${esc(folder)}" onsubmit="var v=prompt('Rename tag',this.name.value);if(v===null)return false;this.name.value=v;return true"><input type="hidden" name="op" value="rename"><input type="hidden" name="name" value="${esc(layout.folders[folder]?.name || "")}"><button class="a" type="submit">Rename</button></form><form class="inline" method="post" action="/folders/${esc(folder)}" onsubmit="return confirm('Delete this tag? The plans keep everything else.')"><input type="hidden" name="op" value="delete"><button class="a" type="submit">Delete tag</button></form></p>` : "";
-  // one table per project, newest first inside it
+  const sidebar = renderSidebar(sessions, layout, { view, agent });
+  const crumbs = tag ? `<div class="crumbs"><a href="/">All plans</a> › <b>${esc(tagName)}</b></div>` : project ? `<div class="crumbs"><a href="/">All plans</a> › <b>${esc(project)}</b></div>` : `<div class="crumbs"><b>All plans</b>${filtered ? " <span>· filtered</span>" : ""}</div>`;
+  const tagRow = tag ? `<p class="meta" style="margin:0 0 8px">${shown.length} plan${shown.length === 1 ? "" : "s"} · <form class="inline" method="post" action="/tags/${esc(tag)}" onsubmit="var v=prompt('Rename tag',this.name.value);if(v===null)return false;this.name.value=v;return true"><input type="hidden" name="op" value="rename"><input type="hidden" name="name" value="${esc(tagName)}"><button class="a" type="submit">Rename</button></form><form class="inline" method="post" action="/tags/${esc(tag)}" onsubmit="return confirm('Delete this tag? It comes off every plan; nothing else changes.')"><input type="hidden" name="op" value="delete"><button class="a" type="submit">Delete tag</button></form></p>` : "";
+  // one table per project in sidebar order; inside a project the dragged order first, then newest first
   const groups = new Map();
-  for (const s of shown) { if (!groups.has(s.project)) groups.set(s.project, []); groups.get(s.project).push(s); }
+  for (const g of orderedProjects(shown, layout)) groups.set(g, orderedPlans(shown.filter((s) => s.project === g), layout, g));
   const cols = `<colgroup>${COLUMNS.map((c) => `<col data-col="${c.k}" data-w="${c.w}" style="width:${c.on ? c.w : "0"}">`).join("")}</colgroup>`;
   const head = `<thead><tr>${COLUMNS.map((c) => `<th data-col="${c.k}"${c.nosort ? " data-nosort" : ""} class="${c.on ? "" : "off"}">${esc(c.label)}${c.k !== "actions" ? '<span class="rz"></span>' : ""}</th>`).join("")}</tr></thead>`;
   const pills = `<span class="pill">${sessions.length} plans · ${sessions.filter((s) => s.agent.state === "active").length} active</span>`;
-  let body = `${crumbs}<h1>${folder ? esc(layout.folders[folder]?.name || "Tag") : project ? esc(project) : "All plans"}</h1>${tagRow}${fbar}`;
+  let body = `${crumbs}<h1>${tag ? `${ICON.tag.replace('<svg ', '<svg style="width:18px;height:18px;color:var(--ink3)" ')} ${esc(tagName)}` : project ? esc(project) : "All plans"}</h1>${tagRow}${fbar}`;
   if (!shown.length) body += `<p class="empty">Nothing here.</p>`;
   for (const [g, list] of groups) {
     const gid = g.replace(/[^a-z0-9]/gi, "-").toLowerCase();
@@ -621,13 +646,7 @@ function renderIndex(sessions, q, serverUp, layout) {
     list.forEach((s, i) => { body += row(s, back, layout, { i, hide: home && i >= 5 }); });
     body += `</tbody></table></div>${home && list.length > 5 ? `<button class="more" type="button" data-grp="${esc(gid)}">Show ${Math.min(10, list.length - 5)} more</button>` : ""}`;
   }
-  return page(folder ? `${layout.folders[folder]?.name || "Tag"} · Lavish` : project ? `${project} · Lavish` : "Lavish home", folder ? layout.folders[folder]?.name || "tag" : project || "all plans", body, serverUp, { pills, sidebar, layout, view });
-}
-function folderOptions(layout, selected = "", exclude = new Set()) {
-  const out = [];
-  const walk = (list, depth) => { for (const n of list) { if (!exclude.has(n.id)) out.push(`<option value="${esc(n.id)}"${n.id === selected ? " selected" : ""}>${"&nbsp;&nbsp;".repeat(depth)}${esc(n.name)}</option>`); walk(n.children, depth + 1); } };
-  walk(folderTree(layout), 0);
-  return out.join("");
+  return page(tag ? `${tagName} · Lavish` : project ? `${project} · Lavish` : "Lavish home", tag ? tagName : project || "all plans", body, serverUp, { pills, sidebar, layout, view });
 }
 /** Plan status cell: the word in effect, and a select that appears on hover or focus. */
 function statusCell(s, back) {
@@ -642,26 +661,30 @@ function hoverCard(s) {
   <p><span class="k">PRs</span>${prChips(s.plan)}</p>
   <p><span class="k">Review</span>${s.agentMsgs} ${s.agentMsgs === 1 ? "reply" : "replies"} · ${s.userSent} sent${s.privateNotes ? ` · ${s.privateNotes} private` : ""}${s.unsentCount ? ` · ${s.unsentCount} unsent` : ""} &nbsp; <span class="k">Versions</span>${s.versionCount || 0} &nbsp; <span class="k">Priority</span>${esc(s.plan.priority)}</p>
   ${latest ? `<p><span class="k">Latest</span>${esc(latest.text)} · ${esc(latest.session?.label || "")} · ${fmtDay(latest.at)}</p>` : ""}
-  <p><span class="k">Agent</span>${a.state === "none" ? "not connected" : `${esc(a.name)} · ${esc(a.provider)}${modelName((s.reg.launch || {}).model) ? ` · ${esc(modelName(s.reg.launch.model))}` : ""} · ${esc(a.state)}${agentPlace(a) ? ` · ${esc(agentPlace(a))}` : ""}`}</p>
+  <p><span class="k">Agent</span>${a.state === "none" ? "not connected" : `${esc(a.name)} · ${esc(a.provider === "codex" ? "Codex" : "Claude")}${agentModel(s) ? ` · ${esc(agentModel(s))}` : ""} · ${esc(a.state)}${agentPlace(a) ? ` · ${esc(agentPlace(a))}` : ""}`}${s.tabs ? ` · ${s.tabs} tab${s.tabs === 1 ? "" : "s"} open` : ""}${s.tags.length ? ` &nbsp; <span class="k">Tags</span>${s.tags.map((t) => esc(t.name)).join(", ")}` : ""}</p>
   <p class="mono" style="color:var(--ink3)">${esc(shortPath(s.resolved || s.file))}${s.moved ? " · path moved, re-linked" : ""}${s.worktree ? ` · worktree ${esc(s.worktree)}` : ""}</p></div>`;
 }
 /** The row's menu (the ⋯ button and the right-click menu clone it). */
 function rowMenu(s, back, layout) {
-  const tags = folderTree(layout);
-  const tagItems = tags.length ? tags.map((n) => `<form method="post" action="/move/${s.key}?back=${back}"><input type="hidden" name="fid" value="${s.folder === n.id ? "" : esc(n.id)}"><button type="submit" class="${s.folder === n.id ? "on" : ""}">${esc(n.name)}</button></form>`).join("") : `<span class="k" style="display:block;padding:6px 10px">No tags yet. Create one in the sidebar.</span>`;
+  const tags = tagList(layout);
+  const has = new Set(s.tags.map((t) => t.id));
+  const tagItems = tags.length ? tags.map((t) => `<form method="post" action="/tag/${s.key}?back=${back}"><input type="hidden" name="tid" value="${esc(t.id)}"><input type="hidden" name="on" value="${has.has(t.id) ? "0" : "1"}"><button type="submit" class="${has.has(t.id) ? "on" : ""}">${esc(t.name)}</button></form>`).join("") : `<span class="k" style="display:block;padding:6px 10px">No tags yet. Create one in the sidebar.</span>`;
+  const live = s.agent.state === "active";
   return [
     s.exists ? `<form method="post" action="/open/${s.key}"><button type="submit">${s.status === "ended" ? "Reopen in Lavish" : "Open in Lavish"}</button></form>` : "",
     s.exists ? `<a href="/session/${s.key}#launch">New session…</a>` : "",
+    s.exists ? `<form method="post" action="/restart/${s.key}" onsubmit="return confirm('Restart: end the Lavish session, close its tabs, and start a NEW agent session on this plan (${esc((s.reg.launch || {}).provider || s.agent.provider || "claude")}, ${esc(agentModel(s) || "default model")})?')"><button type="submit" title="${live ? `Refused while ${esc(s.agent.name)} is live: end it first` : "End the Lavish session and its tabs, then start a fresh agent session that reopens this plan"}">Restart${live ? ' <span class="k">live: refuses</span>' : ""}</button></form>` : "",
     `<a href="/session/${s.key}">Log</a>`,
     `<details><summary>Tag <span class="k">›</span></summary><div class="sub">${tagItems}</div></details>`,
     "<hr>",
-    s.exists && s.status !== "ended" ? `<form method="post" action="/end/${s.key}" onsubmit="return confirm('End this Lavish session? The plan is not retired.')"><button type="submit">End session</button></form>` : "",
+    s.exists && s.status !== "ended" ? `<form method="post" action="/end/${s.key}?close=1&back=${back}" onsubmit="return confirm('End this Lavish session and close its browser tabs? The plan is not retired.')"><button type="submit">End session and close tabs${s.tabs ? ` <span class="k">${s.tabs} tab${s.tabs === 1 ? "" : "s"}</span>` : ""}</button></form>` : "",
+    s.tabs > 1 ? `<form method="post" action="/tabs/${s.key}/close?back=${back}"><button type="submit" title="Every tab but the one that pinged last closes itself">Close other tabs <span class="k">${s.tabs - 1}</span></button></form>` : "",
     s.plan.status !== "retired" ? `<form method="post" action="/status/${s.key}?back=${back}"><input type="hidden" name="status" value="retired"><button type="submit" class="danger" title="Park or abandon this plan (hidden from the default view)">Retire</button></form>` : `<form method="post" action="/status/${s.key}?back=${back}"><input type="hidden" name="status" value=""><button type="submit">Unretire (infer status)</button></form>`,
   ].join("");
 }
 function row(s, back = "", layout, { i = 0, hide = false } = {}) {
   const p = s.plan, b = p.build, launch = s.reg.launch || {};
-  const resume = s.exists && s.agent.state !== "none" ? `<form class="inline" method="post" action="/connect/${s.key}" title="${esc(s.agent.state === "active" ? (s.agent.terminal ? "Bring its terminal forward and open the plan in Lavish" : `Live in ${s.agent.entrypointLabel}: opens the plan in Lavish only`) : `Resume ${s.agent.name} in a terminal (${modelName(launch.model) || "default model"}, ${launch.effort || "default effort"}) and open the plan in Lavish`)}"><input type="hidden" name="model" value="${esc(launch.model || "")}"><input type="hidden" name="effort" value="${esc(launch.effort || "")}"><button class="a" type="submit">Resume</button></form>` : "";
+  const resume = s.exists && s.agent.state !== "none" ? `<form class="inline" method="post" action="/connect/${s.key}" title="${esc(s.agent.state === "active" ? (s.agent.terminal ? "Bring its terminal forward and open the plan in Lavish" : `Live in ${s.agent.entrypointLabel}: opens the plan in Lavish only`) : `Resume ${s.agent.name} in a terminal (${agentModel(s) || "default model"}, ${launch.effort || "default effort"}) and open the plan in Lavish`)}"><input type="hidden" name="model" value="${esc(launch.model || "")}"><input type="hidden" name="effort" value="${esc(launch.effort || "")}"><button class="a" type="submit">Resume</button></form>` : "";
   const view = s.exists ? `<a class="a" href="/view/${s.key}/" target="_blank" rel="noopener" title="Read the plan as it is on disk: no Lavish chrome, no session change">View</a>` : "";
   const reviews = `${s.agentMsgs} ${s.agentMsgs === 1 ? "reply" : "replies"} · ${s.userSent} sent${s.privateNotes ? ` · ${s.privateNotes} private` : ""}`;
   const cells = {
@@ -672,7 +695,7 @@ function row(s, back = "", layout, { i = 0, hide = false } = {}) {
     modified: `<span class="num" title="${esc(fmt(s.updated))}">${fmtDay(s.updated)}</span>`,
     added: `<span class="num" title="${esc(s.added ? fmt(s.added) : "unknown")}">${s.added ? fmtDay(s.added).replace(/^today .*/, "today") : "–"}</span>`,
     actions: `${view}${resume}<button class="dots" type="button" title="More actions (right-click the row does the same)" aria-label="More actions">⋯</button><div class="menu src">${rowMenu(s, back, layout)}</div>`,
-    folder: folderCellHtml(s),
+    tags: tagsCellHtml(s),
     priority: `<span class="prio ${esc(p.priority)}">${esc(p.priority)}</span>`,
     project: `<a class="a" style="color:var(--ink2)" href="/?project=${encodeURIComponent(s.project)}">${esc(s.project)}</a>`,
     completed: `<span class="num">${p.completedAt ? fmtDay(p.completedAt) : "–"}</span>`,
@@ -680,7 +703,7 @@ function row(s, back = "", layout, { i = 0, hide = false } = {}) {
     versions: `<span class="num">${s.versionCount || 0}</span>`,
     reviews: `<span class="num">${esc(reviews)}</span>`,
   };
-  const sortv = { plan: s.title.toLowerCase(), status: STATUSES.indexOf(p.status), build: b.rank, session: s.agent.state === "none" ? "~" : s.agent.name, modified: s.updated.toISOString(), added: s.added ? new Date(s.added).toISOString() : "", folder: s.folderPath.map((f) => f.name).join(" ").toLowerCase(), priority: PRIO_RANK[p.priority], project: s.project.toLowerCase(), completed: p.completedAt || "", retired: p.retiredAt || "", versions: s.versionCount || 0, reviews: s.agentMsgs + s.userSent };
+  const sortv = { plan: s.title.toLowerCase(), status: STATUSES.indexOf(p.status), build: b.rank, session: s.agent.state === "none" ? "~" : s.agent.name, modified: s.updated.toISOString(), added: s.added ? new Date(s.added).toISOString() : "", tags: s.tags.map((t) => t.name).join(" ").toLowerCase(), priority: PRIO_RANK[p.priority], project: s.project.toLowerCase(), completed: p.completedAt || "", retired: p.retiredAt || "", versions: s.versionCount || 0, reviews: s.agentMsgs + s.userSent };
   const sortAttrs = Object.entries(sortv).map(([k, v]) => `data-s-${k}="${esc(v)}"`).join(" ");
   return `<tr id="row-${s.key}" class="${p.status === "retired" ? "retired" : ""}${hide ? " hid" : ""}" data-key="${s.key}" data-drag="plan:${s.key}" draggable="true" data-i="${i}" tabindex="0" ${sortAttrs}>${COLUMNS.map((c) => `<td data-col="${c.k}" class="${c.k === "plan" ? "name" : c.k === "actions" ? "acts" : ""}${c.on ? "" : " off"}">${cells[c.k]}</td>`).join("")}</tr>`;
 }
@@ -695,7 +718,8 @@ function launchForms(s, { cwd = "" } = {}) {
   const resumeForm = a.state === "none" ? `<p class="meta" style="margin:0 0 4px">No agent has polled this plan yet, so there is nothing to resume. Start a new session below, or run <span class="mono">lavish-poll</span> from the session that is on it.</p>` :
     `<form class="xform" method="post" action="/connect/${s.key}"><div class="row"><button class="b" type="submit">${a.state === "active" ? (a.terminal ? "Bring the terminal forward" : "Open in Lavish") : "Resume"}</button> ${glyph(a.provider)} <span class="mono">${esc(a.name)}</span>
     <label>Model <select name="model">${a.provider === "codex" ? `<option value="">default</option>` : opts(LAUNCH_OPTIONS.claude.models, l.model)}</select></label>${a.provider === "codex" ? `<label>or <input type="text" name="model_free" value="${esc(l.model && !LAUNCH_OPTIONS.codex.models.includes(l.model) ? l.model : "")}" placeholder="codex model (free text)" style="width:160px"></label>` : ""}<label>Effort <select name="effort">${opts(LAUNCH_OPTIONS[a.provider === "codex" ? "codex" : "claude"].efforts, l.effort)}</select></label></div>
-    <p class="meta" style="margin:0">${a.state === "active" ? (a.terminal ? `Already running in tmux ${esc(a.tmuxName)}: nothing new is started. Model and effort apply at the next resume.` : `Live in ${esc(a.entrypointLabel)}: nothing is spawned (a second writer would corrupt its transcript); the plan opens in Lavish.`) : `Ended ${esc(ago(a.at))}. Starts <span class="mono">tmux new-session -s ${esc(a.tmuxName)}</span> in <span class="mono">${esc(shortPath(a.cwd || ""))}</span> running <span class="mono">${a.provider === "codex" ? "codex resume" : "claude --resume"} ${esc(String(a.id).slice(0, 8))}…</span>, opens Terminal.app on it, then the plan in Lavish. Remembered per plan.`}</p></form>`;
+    <p class="meta" style="margin:0">${a.state === "active" ? (a.terminal ? `Already running in tmux ${esc(a.tmuxName)}: nothing new is started. Model and effort apply at the next resume.` : `Live in ${esc(a.entrypointLabel)}: nothing is spawned (a second writer would corrupt its transcript); the plan opens in Lavish.`) : `Ended ${esc(ago(a.lastAt || a.at))}. Starts <span class="mono">tmux new-session -s ${esc(a.tmuxName)}</span> in <span class="mono">${esc(shortPath(a.cwd || ""))}</span> running <span class="mono">${a.provider === "codex" ? "codex resume" : "claude --resume"} ${esc(String(a.id).slice(0, 8))}…</span>, opens Terminal.app on it, then the plan in Lavish. Remembered per plan.`}</p></form>
+    <form class="xform" method="post" action="/restart/${s.key}" onsubmit="return confirm('Restart: end the Lavish session, close its tabs, and start a NEW ${esc(provider)} session on this plan?')"><div class="row"><button class="b q" type="submit"${a.state === "active" ? " disabled" : ""}>Restart</button><span class="meta">${a.state === "active" ? `refused while ${esc(a.name)} is live in ${a.terminal ? "terminal " + esc(a.tmuxName) : esc(a.entrypointLabel)}: end it there first (a second agent on one plan would fight the first)` : `ends the Lavish session and its tabs, then starts a fresh ${esc(provider === "codex" ? "Codex" : "Claude")} session (${esc(modelName(l.model) || "default model")}, ${esc(l.effort || "default effort")}) whose first prompt reopens this plan; the old session is never resumed`}</span></div></form>`;
   const newForm = `<form class="xform" method="post" action="/connect/${s.key}?new=1"><div class="row"><b>New</b> <label>Provider <select name="provider" onchange="this.form.querySelector('[name=model]').innerHTML=this.value==='codex'?'<option value=\\'\\'>default</option>':'${LAUNCH_OPTIONS.claude.models.map((m) => `<option value=${m}>${m}</option>`).join("")}';this.form.querySelector('[name=effort]').innerHTML=(this.value==='codex'?${JSON.stringify(LAUNCH_OPTIONS.codex.efforts)}:${JSON.stringify(LAUNCH_OPTIONS.claude.efforts)}).map(function(e){return '<option value='+e+'>'+e+'</option>'}).join('')"><option value="claude"${provider !== "codex" ? " selected" : ""}>Claude</option><option value="codex"${provider === "codex" ? " selected" : ""}>Codex</option></select></label>
     <label>Model <select name="model">${provider === "codex" ? `<option value="">default</option>` : opts(LAUNCH_OPTIONS.claude.models, l.model)}</select></label><label>or <input type="text" name="model_free" placeholder="codex model (free text)" style="width:150px"></label><label>Effort <select name="effort">${opts(LAUNCH_OPTIONS[provider === "codex" ? "codex" : "claude"].efforts, l.effort)}</select></label></div>
     <div class="row"><label style="flex:1">Folder <input type="text" name="cwd" value="${esc(cwd || projectCwd(s))}" style="flex:1"></label></div>
@@ -707,12 +731,13 @@ function launchForms(s, { cwd = "" } = {}) {
 function agentBlock(s, { effortResult = "", scanResult = "" } = {}) {
   const a = s.agent;
   const owned = a.state === "active" && a.terminal && a.provider === "claude";
-  const model = modelName((s.reg.launch || {}).model);
-  return `<div class="kv"><span class="k">State</span><span>${a.state === "none" ? '<span class="ag none">not connected</span>' : `<span class="ag ${a.state}${a.source === "scan" ? " scan" : ""}">${a.state === "active" ? '<span class="dot"></span>' : ""}${esc(a.state)}${a.state === "active" ? ` · ${a.terminal ? "terminal " + esc(a.tmuxName) : esc(a.entrypointLabel)}${a.status ? ` · ${esc(a.status)}` : ""}` : ` · ${esc(ago(a.at))}`}</span>`}</span>
-  ${a.state !== "none" ? `<span class="k">Session</span><span>${glyph(a.provider)} <span class="mono" title="${esc(a.id)}">${esc(a.name)}</span> · ${esc(a.provider === "codex" ? "Codex" : "Claude")}${model ? ` · ${esc(model)}` : ""}${a.guessed ? " · guessed (several live Codex threads in this folder)" : ""}</span><span class="k">Folder</span><span class="mono">${esc(shortPath(a.cwd || ""))}${a.cwd && !existsSync(a.cwd) ? ' <span class="st orphan">missing</span>' : ""}</span><span class="k">Stamped</span><span>${esc(a.source)} · ${fmt(a.at)}${a.state === "ended" ? ` · would resume as <span class="mono">${esc(a.tmuxName)}</span>` : ""}</span>` : ""}</div>
+  const model = agentModel(s);
+  return `<div class="kv"><span class="k">State</span><span>${a.state === "none" ? '<span class="ag none">not connected</span>' : `<span class="ag ${a.state}${a.source === "scan" ? " scan" : ""}">${a.state === "active" ? '<span class="dot"></span>' : ""}${esc(a.state)}${a.state === "active" ? ` · ${a.terminal ? "terminal " + esc(a.tmuxName) : esc(a.entrypointLabel)}${a.status ? ` · ${esc(a.status)}` : ""}` : ` · ${esc(ago(a.lastAt || a.at))}`}${s.tabs ? ` · ${s.tabs} tab${s.tabs === 1 ? "" : "s"} open` : ""}</span>`}</span>
+  ${a.state !== "none" ? `<span class="k">Session</span><span>${glyph(a.provider)} <span class="mono" title="${esc(a.id)}">${esc(a.name)}</span> · ${esc(a.provider === "codex" ? "Codex" : "Claude")}${model ? ` · ${esc(model)}` : ""}${a.model ? "" : model ? ' <span class="meta" title="the transcript was not found; this is the launch choice remembered for the plan">(remembered)</span>' : ""}${a.guessed ? " · guessed (several live Codex threads in this folder)" : ""}</span><span class="k">Folder</span><span class="mono">${esc(shortPath(a.cwd || ""))}${a.cwd && !existsSync(a.cwd) ? ' <span class="st orphan">missing</span>' : ""}</span><span class="k">Started</span><span>${a.startedAt ? fmt(a.startedAt) : "–"} · stamped by ${esc(a.source)} ${fmt(a.at)}${a.state === "ended" ? ` · would resume as <span class="mono">${esc(a.tmuxName)}</span>` : ""}</span>` : ""}</div>
   ${effortResult ? `<div class="notice">${esc(effortResult)}</div>` : ""}${scanResult ? `<div class="notice">${esc(scanResult)}</div>` : ""}
   ${owned ? `<form class="inline" method="post" action="/effort/${s.key}" style="display:block;margin:0 0 10px"><label>Change effort <select name="level">${LAUNCH_OPTIONS.claude.efforts.filter((e) => e !== "default").map((e) => `<option value="${e}">${e}</option>`).join("")}</select></label> <button class="b q" type="submit" title="Types /effort <level> into the terminal ${esc(a.tmuxName)}, only while it is idle at its prompt, then shows the pane's reply">Type /effort into the terminal</button></form>` : ""}`;
 }
+const ENTRYPOINT_WORD = { "claude-vscode": "VS Code", "claude-cursor": "Cursor", "claude-desktop": "Desktop", cli: "terminal", codex: "Codex" };
 /** Sessions table: every agent that has been on this plan (the current one first). */
 function sessionsTable(s) {
   const list = [];
@@ -721,12 +746,14 @@ function sessionsTable(s) {
   if (!list.length) return `<p class="empty">No session has polled this plan yet.</p>`;
   const rows = list.map((x) => {
     const live = s.agent.id === x.id ? s.agent : null;
-    const model = live && modelName((s.reg.launch || {}).model);
-    const where = live ? (live.state === "active" ? (live.terminal ? "terminal" : live.entrypointLabel || "editor") : "ended") : "ended";
-    const acts = live && live.state === "active" ? `<form class="inline" method="post" action="/open/${s.key}"><button class="a" type="submit">Open in Lavish</button></form>` : `<form class="inline" method="post" action="/connect/${s.key}?agent=${encodeURIComponent(x.id)}"><button class="a" type="submit" title="Resume this particular session in a terminal">Resume</button></form>`;
-    return `<tr><td class="sess">${glyph(x.provider)} <span class="ag ${x.source === "scan" ? "scan" : ""}" style="display:inline-flex" title="${esc(x.provider)} ${esc(x.id)} · ${esc(x.source || "poll")}"><span class="name">${esc(agentLabel(x))}</span></span>${live && live.state === "active" ? ' <span class="dot"></span>' : ""}</td><td>${model ? esc(model) : '<span class="num">–</span>'}</td><td>${esc(where)}</td><td class="num">${fmt(x.at)}</td><td class="num">–</td><td class="num">–</td><td>${acts}</td></tr>`;
+    const info = sessionInfoOf(x);
+    const model = modelName(info.model) || (live ? modelName((s.reg.launch || {}).model) : "");
+    const active = live && live.state === "active";
+    const where = active ? (live.terminal ? "terminal" : live.entrypointLabel || "editor") : (ENTRYPOINT_WORD[x.entrypoint] || (x.provider === "codex" ? "Codex" : "ended"));
+    const acts = active ? `<form class="inline" method="post" action="/open/${s.key}"><button class="a" type="submit">Open in Lavish</button></form>` : `<form class="inline" method="post" action="/connect/${s.key}?agent=${encodeURIComponent(x.id)}"><button class="a" type="submit" title="Resume this particular session in a terminal">Resume</button></form>`;
+    return `<tr><td class="sess">${glyph(x.provider)} <span class="ag ${x.source === "scan" ? "scan" : ""}" style="display:inline-flex" title="${esc(x.provider)} ${esc(x.id)} · ${esc(x.source || "poll")}${info.file ? ` · ${esc(shortPath(info.file))}` : " · no transcript found"}"><span class="name">${esc(agentLabel(x))}</span></span>${active ? ' <span class="dot"></span>' : ""}</td><td>${model ? esc(model) : '<span class="num" title="no transcript found for this id">–</span>'}</td><td>${esc(where)}</td><td class="num">${info.startedAt ? fmt(info.startedAt) : `<span title="stamped ${esc(fmt(x.at))}">–</span>`}</td><td class="num">${active ? "–" : info.lastAt ? fmt(info.lastAt) : "–"}</td><td class="num">${live && s.tabs ? `${s.tabs} tab${s.tabs === 1 ? "" : "s"}` : "–"}</td><td>${acts}</td></tr>`;
   }).join("");
-  return `<div class="tw"><table class="tl"><colgroup><col style="width:24%"><col style="width:11%"><col style="width:11%"><col style="width:14%"><col style="width:14%"><col style="width:10%"><col style="width:16%"></colgroup><thead><tr><th>Session</th><th>Model</th><th>Where</th><th title="the stamp's time until CS2 reads the transcript">Last seen</th><th>Last ended</th><th>Browsers</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  return `<div class="tw"><table class="tl"><colgroup><col style="width:24%"><col style="width:11%"><col style="width:11%"><col style="width:14%"><col style="width:14%"><col style="width:10%"><col style="width:16%"></colgroup><thead><tr><th>Session</th><th>Model</th><th>Where</th><th title="first line of the transcript">Started</th><th title="last line of the transcript, when not live">Last ended</th><th title="Lavish tabs open on this plan (pinged in the last 30 s)">Browsers</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 function renderSession(s, all, serverUp, q, layout) {
@@ -748,12 +775,13 @@ function renderSession(s, all, serverUp, q, layout) {
       <label>Priority <select name="priority" onchange="this.form.submit()">${PRIORITIES.map((x) => `<option value="${x}"${p.priority === x ? " selected" : ""}>${x}</option>`).join("")}</select></label>
       <label>PR # <input type="number" name="pr" min="1" style="width:80px" placeholder="536"></label><button class="b q" type="submit">Save</button></div>
       <label style="display:flex">Summary <input type="text" name="summary" value="${esc(s.reg.summary || "")}" placeholder="${esc(s.head.summary || "one line, shown on the home page")}" style="flex:1"></label></form>
-    <p class="meta" style="margin:8px 0 0"><form class="inline" method="post" action="/refresh-prs/${s.key}"><button class="a" type="submit" title="Runs gh pr view for each PR">Refresh PR states</button></form>${prRefreshed ? `<span>${esc(prRefreshed)}</span>` : ""} ${s.exists ? `<a class="a" href="/view/${s.key}/" target="_blank" rel="noopener">View</a><form class="inline" method="post" action="/open/${s.key}"><button class="a" type="submit">${s.status === "ended" ? "Reopen in Lavish" : "Open in Lavish"}</button></form>` : ""}${s.exists && s.status !== "ended" ? `<form class="inline" method="post" action="/end/${s.key}" onsubmit="return confirm('End this Lavish session?')"><button class="a" type="submit">End session</button></form>` : ""}<form class="inline" method="post" action="/scan/${s.key}"><button class="a" type="submit" title="Look through this project's transcripts of the last 7 days for sessions that read or edited this plan">Find sessions</button></form></p>`;
+    <p class="meta" style="margin:8px 0 0"><form class="inline" method="post" action="/refresh-prs/${s.key}"><button class="a" type="submit" title="Runs gh pr view for each PR">Refresh PR states</button></form>${prRefreshed ? `<span>${esc(prRefreshed)}</span>` : ""} ${s.exists ? `<a class="a" href="/view/${s.key}/" target="_blank" rel="noopener">View</a><form class="inline" method="post" action="/open/${s.key}"><button class="a" type="submit">${s.status === "ended" ? "Reopen in Lavish" : "Open in Lavish"}</button></form>` : ""}${s.exists && s.status !== "ended" ? `<form class="inline" method="post" action="/end/${s.key}" onsubmit="return confirm('End this Lavish session?')"><button class="a" type="submit">End session</button></form>` : ""}<form class="inline" method="post" action="/scan/${s.key}"><button class="a" type="submit" title="Look through this project's transcripts of the last 7 days for sessions that read or edited this plan">Find sessions</button></form>${s.exists && s.status !== "ended" ? `<form class="inline" method="post" action="/end/${s.key}?close=1&back=${encodeURIComponent(`/session/${s.key}`)}" onsubmit="return confirm('End this Lavish session and close its browser tabs?')"><button class="a" type="submit">End and close tabs</button></form>` : ""}</p>
+    <p class="meta tags" style="margin:8px 0 0"><span class="k" style="margin-right:6px">Tags</span>${tagList(layout).map((t) => { const on = s.tags.some((x) => x.id === t.id); return `<form class="inline" method="post" action="/tag/${s.key}?back=${encodeURIComponent(`/session/${s.key}`)}"><input type="hidden" name="tid" value="${esc(t.id)}"><input type="hidden" name="on" value="${on ? "0" : "1"}"><button type="submit" class="tg1" style="cursor:pointer;border:1px solid ${on ? "var(--acc)" : "var(--rule)"};${on ? "background:var(--accSoft);color:var(--acc)" : ""}" title="${on ? "Remove the tag" : "Add the tag"}">${on ? "✓ " : ""}${esc(t.name)}</button></form>`; }).join(" ") || "none yet (create one in the sidebar)"}</p>`;
   const steps = [...STAGES].map((st, i) => `<span class="${p.stage === st ? "now" + (p.stageInferred ? " inferred" : "") : i < p.stageIndex ? "past" : ""}">${STAGE_LABELS[st]}</span>`).join("");
   const latest = p.progress.latest;
-  const sidebar = renderSidebar(all, layout, { current: s.key, counts: folderCounts(layout, all) });
-  const body = `<div class="crumbs"><a href="/">All plans</a> › <a href="/?project=${encodeURIComponent(s.project)}">${esc(s.project)}</a>${s.folderPath.map((f) => ` › <a href="/?folder=${esc(f.id)}">${esc(f.name)}</a>`).join("")} › <b>${esc(s.title)}</b></div>
-  <h1>${esc(s.title)} <span class="vn" style="font-size:13px">v${s.versionCount || 0}</span>${!s.exists ? ' <span class="st orphan">file missing</span>' : ""}</h1>
+  const sidebar = renderSidebar(all, layout, { current: s.key });
+  const body = `<div class="crumbs"><a href="/">All plans</a> › <a href="/?project=${encodeURIComponent(s.project)}">${esc(s.project)}</a> › <b>${esc(s.title)}</b>${s.tags.length ? ` <span class="tags" style="margin-left:6px">${s.tags.map((t) => `<a class="tg1" href="/?tag=${esc(t.id)}">${esc(t.name)}</a>`).join("")}</span>` : ""}</div>
+  <h1>${esc(s.title)} <span class="vn" style="font-size:13px">v${s.versionCount || 0}</span>${!s.exists ? ' <span class="st orphan">file missing</span>' : ""}${s.exists ? ` <details class="fold" style="margin:0;font-size:13px;font-weight:400"><summary title="Rewrite the file's &lt;title&gt; (the current file is snapshotted first)">Rename</summary><form class="xform in" method="post" action="/rename/${s.key}" style="display:flex;gap:6px;align-items:center;flex-wrap:nowrap"><input type="text" name="title" value="${esc(s.title)}" maxlength="140" required style="width:min(60vw,520px)"><button class="b" type="submit">Save</button><span class="meta">what it decides, entity first, 3 to 7 words, no dates or codes</span></form></details>` : ""}</h1>
   <p class="meta" style="margin:0">${p.summary ? esc(p.summary) : `<span>${esc(s.project)}${s.worktree ? ` · worktree ${esc(s.worktree)}` : ""}</span>`}${p.summary && s.worktree ? ` · worktree ${esc(s.worktree)}` : ""}${related ? ` · <b>Related</b> ${related}` : ""}</p>
   <div class="stageline"><div class="stage-steps${p.stage === "parked" ? " parked" : ""}">${steps}</div><span>· ${esc(p.subLabel)}${p.stageNote ? ` · ${esc(p.stageNote)}` : ""}${latest ? ` · latest: ${esc(latest.text)} · ${esc(latest.session?.label || "")} · ${fmtDay(latest.at)}` : ""}</span></div>
   ${restored ? `<div class="notice">Restored version ${esc(restored)} onto disk. Your Lavish tab will offer a reload. The agent does not learn about this by itself, so tell it in the conversation panel.</div>` : ""}
@@ -793,6 +821,11 @@ function versionWhy(v) {
   if (v.label) return v.label;
   return { "agent-reply": "round closed: the agent replied", poll: "agent polled", baseline: "first snapshot", "pre-restore": "before a restore", restore: "restored version", chrome: "saved from the Lavish page", scan: "edited between rounds" }[v.reason] || "file changed on disk";
 }
+/** Continue from ▾: restore only · restore and Resume the last session · restore and start a New session (POST /restore/<key>/<n>?then=). */
+function continueFrom(s, n, { cls = "a" } = {}) {
+  const f = (then, label, title) => `<form method="post" action="/restore/${s.key}/${n}${then ? `?then=${then}` : ""}" onsubmit="return confirm('Continue from version ${n}${then === "resume" ? " and resume the last session" : then === "new" ? " and start a new session" : ""}? The current file is snapshotted first, then v${n} is written over it, so nothing is lost.')"><button type="submit" title="${esc(title)}">${label}</button></form>`;
+  return `<details class="cf" style="display:inline-block;position:relative"><summary class="${cls}" style="list-style:none;display:inline;cursor:pointer">Continue from ▾</summary><div class="menu" style="position:absolute;right:0;top:calc(100% + 4px);z-index:9">${f("", "Just restore this version", "Snapshot the current file, then put this version back on disk")}${s.agent.state !== "none" ? f("resume", "Restore and Resume the last session", `Then resume ${s.agent.name} as the Resume button would`) : ""}${f("new", "Restore and start a New session", "Then start a fresh session in a terminal with the default prompt")}</div></details>`;
+}
 function renderVersions(s) {
   const cur = currentVersionState(s);
   const buckets = commentsPerVersion(s);
@@ -808,7 +841,7 @@ function renderVersions(s) {
     const acts = [
       `<a class="a" href="/version/${s.key}/${v.n}/" target="_blank" rel="noopener">View</a>`,
       prev ? `<a class="a" href="/diff/${s.key}/${prev.n}/${v.n}" title="What changed against v${prev.n}">Diff</a>` : "",
-      s.exists && (cur.dirty || v.n !== cur.n) ? `<form class="inline" method="post" action="/restore/${s.key}/${v.n}" onsubmit="return confirm('Continue from version ${v.n}? The current file is snapshotted first, then v${v.n} is written over it, so nothing is lost.')"><button class="a" type="submit" title="Today's Restore: snapshot the current file, then put this version back on disk">Continue from</button></form>` : "",
+      s.exists && (cur.dirty || v.n !== cur.n) ? continueFrom(s, v.n) : "",
     ].join("");
     html += `<tr id="v${v.n}"><td><b>v${v.n}</b>${v.n === cur.n && !cur.dirty ? ' <span class="st open">current</span>' : ""}${v.round != null ? ` <span class="num" title="review round">r${v.round}</span>` : ""}</td><td class="num">${fmt(v.at)}</td><td>${esc(versionWhy(v))}</td><td>${commentsCell}</td><td>${acts}</td></tr>`;
   }
@@ -846,11 +879,41 @@ function versionBanner(s, v) {
   const link = (href, text) => `<a style="color:#ffd877;text-decoration:underline;text-underline-offset:2px" href="${href}">${text}</a>`;
   return `<div data-lavish-ui="version-banner" style="position:sticky;top:0;z-index:2147483000;background:#1c1b1a;color:#f3f1ec;font:13px/1.4 system-ui,sans-serif;padding:8px 14px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;box-shadow:0 2px 8px rgba(0,0,0,.25)"><span>Read-only snapshot · <b>v${v.n}</b> of ${total} · saved ${esc(fmt(v.at))}${v.label ? ` · ${esc(v.label)}` : v.round != null ? ` · round ${v.round}` : ""}</span>${link(`/session/${s.key}#versions`, "Version history")}${s.exists ? link(`/diff/${s.key}/${v.n}/current`, "Diff against current") : ""}</div>`;
 }
+/** Every conversation item of one version's window: comments sent, messages, agent replies, private notes, from v.at until the next version. */
+function momentItems(s, v) {
+  const next = s.versions.find((x) => x.n > v.n);
+  const first = s.versions[0] && s.versions[0].n === v.n;
+  const inWindow = (at) => at && (first || String(at) >= String(v.at)) && (!next || String(at) < String(next.at));
+  const items = transcript(s).filter((i) => inWindow(i.at)).map((i) => ({ ...i }));
+  for (const n of s.notes) if (inWindow(n.created)) items.push({ at: n.created, role: "private", kind: n.state || "private", text: n.body, where: n.anchor?.text || "" });
+  return items.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+}
+function renderVersionView(s, n, serverUp) {
+  const v = s.versions.find((x) => x.n === n);
+  if (!v || !existsSync(versionPath(s.key, n))) return null;
+  const items = momentItems(s, v);
+  const cur = currentVersionState(s);
+  const msg = (i) => `<div class="msg ${i.role === "agent" ? "agent" : i.role === "system" ? "sys" : i.role === "private" ? "priv" : i.kind === "annotation" ? "ann" : ""}" style="max-width:none;font-size:12.5px"><small>${i.role === "agent" ? "agent" : i.role === "system" ? "system" : i.role === "private" ? "private" : "you"} · ${esc(i.kind || "")}${i.where ? ` · “${esc(String(i.where).slice(0, 70))}”` : ""} · ${fmt(i.at)}</small>${esc(i.text)}</div>`;
+  const counts = { sent: items.filter((i) => i.role === "user" && i.kind !== "message").length, msgs: items.filter((i) => i.role === "user" && i.kind === "message").length, replies: items.filter((i) => i.role === "agent").length, priv: items.filter((i) => i.role === "private").length };
+  const prev = s.versions.filter((x) => x.n < n).pop();
+  const nextV = s.versions.find((x) => x.n > n);
+  const body = `<div style="display:grid;grid-template-columns:minmax(0,1fr) 380px;height:calc(100vh - 48px)">
+  <iframe src="/version/${s.key}/${n}/raw" title="v${n} of ${esc(s.title)}" style="width:100%;height:100%;border:0;border-right:1px solid var(--rule);background:#fff"></iframe>
+  <aside style="overflow:auto;padding:14px 16px 40px;background:var(--surface)">
+    <div class="crumbs"><a href="/session/${s.key}">${esc(s.title)}</a> › <a href="/session/${s.key}#versions">Versions</a> › <b>v${n}</b></div>
+    <h2 style="margin:6px 0 4px">v${n}${v.n === cur.n && !cur.dirty ? ' <span class="st open">current</span>' : ""} <span class="meta">of ${s.versions.length} · saved ${fmt(v.at)}${v.round != null ? ` · round ${v.round}` : ""}</span></h2>
+    <p class="meta" style="margin:0 0 10px">${esc(versionWhy(v))}</p>
+    <p style="margin:0 0 14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">${prev ? `<a class="a" href="/version/${s.key}/${prev.n}/">← v${prev.n}</a><a class="a" href="/diff/${s.key}/${prev.n}/${n}">Diff → v${prev.n}</a>` : ""}${nextV ? `<a class="a" href="/version/${s.key}/${nextV.n}/">v${nextV.n} →</a>` : ""}${s.exists ? `<a class="a" href="/diff/${s.key}/${n}/current">Diff → current</a>` : ""}${s.exists && (cur.dirty || n !== cur.n) ? continueFrom(s, n, { cls: "b q" }) : '<span class="meta">this is the file on disk</span>'}</p>
+    <h3 style="margin:0 0 8px;font-size:13.5px">This moment <span class="meta">${counts.sent} sent · ${counts.msgs} message${counts.msgs === 1 ? "" : "s"} · ${counts.replies} repl${counts.replies === 1 ? "y" : "ies"}${counts.priv ? ` · ${counts.priv} private` : ""} · until ${nextV ? `v${nextV.n}` : "now"}</span></h3>
+    ${items.length ? items.map(msg).join("") : '<p class="empty" style="padding:6px 0">Nothing was written while this version was on screen.</p>'}
+  </aside></div>`;
+  return page(`v${n} · ${s.title}`, `${s.project} · ${s.title} · v${n}`, body, serverUp, { wide: true, key: s.key });
+}
 function serveVersion(res, s, n) {
   const v = s.versions.find((x) => x.n === n);
   if (!v || !existsSync(versionPath(s.key, n))) return send(res, 404, "text/plain", "no such version");
   let html = readFileSync(versionPath(s.key, n), "utf8");
-  const base = `<base href="/version/${s.key}/${n}/">`;
+  const base = `<base href="/version/${s.key}/${n}/" target="_parent">`;
   html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => m + base) : base + html;
   html = /<body[^>]*>/i.test(html) ? html.replace(/<body[^>]*>/i, (m) => m + versionBanner(s, v)) : versionBanner(s, v) + html;
   send(res, 200, "text/html; charset=utf-8", html);
@@ -896,14 +959,40 @@ function renderDiff(s, a, b, serverUp) {
 }
 
 /* ── progress, unsent and export sections of the session page ─────────── */
+/** The plan's main events, newest first: the registry log (status, PRs, notes, verdicts), PR merges (gh), the first version,
+ *  every session's start and end (from its transcript) and the terminals this page started. No per-poll entries. */
+function historyOf(s) {
+  const ev = [];
+  const w = (x) => (STATUS_WORDS[x] || [x.replace(/-/g, " ") || "(inferred)"])[0];
+  for (const e of s.reg.progress || []) {
+    let text = e.text || "";
+    if (e.kind === "status") { const m = /status (.*) → (.*)/.exec(text); text = m ? `Plan status · ${w(m[1].trim().replace(/[()]/g, ""))} → ${w(m[2].trim().replace(/[()]/g, ""))}${/implemented/.test(m[2]) ? " (verified)" : ""}` : `Plan status · ${text}`; }
+    else if (e.kind === "pr") text = `Build · ${text}`;
+    else if (e.kind === "verdict") text = `Review · ${text}`;
+    else if (/^restarted by the home page/.test(text)) text = `Restarted · ${text.replace(/^restarted by the home page:?\s*/, "")}`;
+    ev.push({ at: e.at, text, by: e.session?.label || "", src: `registry log · ${e.kind || "note"}`, pct: e.pct });
+  }
+  for (const p of s.plan.prs) if (p.mergedAt) ev.push({ at: p.mergedAt, text: `Build · PR #${p.n} merged${p.title ? ` · ${p.title}` : ""}`, by: "GitHub", src: "gh pr view · mergedAt" });
+  if (s.versions[0]) ev.push({ at: s.versions[0].at, text: "Plan created · first version saved", by: "", src: "versions index" });
+  const seen = new Set();
+  for (const x of [s.reg.agent, ...s.agents]) {
+    if (!x || !x.id || seen.has(x.id)) continue; seen.add(x.id);
+    const info = sessionInfoOf(x);
+    const label = `${agentLabel(x)} (${modelName(info.model) || (x.provider === "codex" ? "Codex" : "Claude")}${ENTRYPOINT_WORD[x.entrypoint] ? `, ${ENTRYPOINT_WORD[x.entrypoint]}` : ""})`;
+    if (info.startedAt) ev.push({ at: info.startedAt, text: `Session started · ${label}`, by: "transcript", src: shortPath(info.file) });
+    const live = s.agent.id === x.id && s.agent.state === "active";
+    if (info.lastAt && !live) ev.push({ at: info.lastAt, text: `Session ended · ${label}`, by: "transcript", src: `last line of ${shortPath(info.file)}` });
+  }
+  for (const t of readTerminals()) if (t.planKey === s.key && t.createdAt) ev.push({ at: new Date(t.createdAt).toISOString(), text: `Terminal started · ${t.tmuxName}${t.model ? ` (${modelName(t.model)})` : ""}`, by: "home page", src: "terminals.json" });
+  return ev.filter((e) => e.at).sort((a, b) => String(b.at).localeCompare(String(a.at)));
+}
 function renderProgress(s) {
   const sessions = recentSessions(s.reg);
-  const entries = (s.reg.progress || []).slice().reverse();
-  const word = (e) => { if (e.kind === "status") { const m = /status (.*) → (.*)/.exec(e.text || ""); const w = (x) => (STATUS_WORDS[x] || [x.replace(/-/g, " ")])[0]; return m ? `Plan status · ${w(m[1].trim())} → ${w(m[2].trim())}` : `Plan status · ${e.text}`; } if (e.kind === "pr") return `Build · ${e.text}`; if (e.kind === "verdict") return `Review · ${e.text}`; return e.text; };
+  const entries = historyOf(s);
   let html = `<form method="post" action="/status/${s.key}" class="xform" style="margin:0 0 10px"><div class="row"><label style="flex:1 1 320px">Add a note <input type="text" name="progress" placeholder="what happened, e.g. PR3 opened (2 of 5)" style="flex:1"></label><label>% <input type="number" name="pct" min="0" max="100" style="width:64px"></label><button class="b q" type="submit">Save</button>${sessions.length ? `<span class="meta">working session${sessions.length > 1 ? "s" : ""} (7 days): ${sessions.map((x) => `<b>${esc(x.label)}</b> · ${fmt(x.at)}`).join(" · ")}</span>` : `<span class="meta">The agent writes here with <span class="mono">lavish-meta &lt;plan&gt; --progress "…"</span>; status and PR changes log themselves.</span>`}</div></form>`;
   if (!entries.length) return html + `<p class="empty" style="padding:6px 0 12px">No events yet.</p>`;
-  html += `<div class="tw"><table class="tl"><colgroup><col style="width:14%"><col style="width:62%"><col style="width:24%"></colgroup><thead><tr><th>When</th><th>Event</th><th>By</th></tr></thead><tbody>`;
-  for (const e of entries) html += `<tr><td class="num">${fmt(e.at)}</td><td title="${esc(e.kind || "note")} · from the registry log">${esc(word(e))}${e.pct != null ? ` <span class="num">· ${e.pct}%</span>` : ""}</td><td class="sess">${esc(e.session?.label || "")}</td></tr>`;
+  html += `<div class="tw"><table class="tl"><colgroup><col style="width:14%"><col style="width:62%"><col style="width:24%"></colgroup><thead><tr><th>When</th><th>Event</th><th title="hover a row for its source">By</th></tr></thead><tbody>`;
+  for (const e of entries) html += `<tr title="source: ${esc(e.src)}"><td class="num">${fmt(e.at)}</td><td>${esc(e.text)}${e.pct != null ? ` <span class="num">· ${e.pct}%</span>` : ""}</td><td class="sess">${esc(e.by)}</td></tr>`;
   return html + `</tbody></table></div>`;
 }
 function renderUnsent(s) {
@@ -1091,8 +1180,38 @@ function serveViewAsset(res, s, rel) {
   res.writeHead(200, { "content-type": MIME[extname(target).toLowerCase()] || "application/octet-stream" });
   createReadStream(target).pipe(res);
 }
-const layoutJson = (sessions) => { const layout = readLayout(); return { layout, counts: folderCounts(layout, sessions), tree: folderTree(layout) }; };
+const layoutJson = (sessions) => { const layout = readLayout(); const tags = tagList(layout, new Set(sessions.map((s) => s.key))); return { layout, tags, counts: Object.fromEntries(tags.map((t) => [t.id, t.count])) }; };
 const okLevel = (v, list) => (list.includes(String(v || "")) ? String(v) : "");
+/** Resume or New session for a plan (the /connect POST, also used after Continue from ▾). Returns {redirect} or {status, html}. */
+async function launchAction(s, { isNew, body, wanted = "" }, serverUp) {
+  const provider = isNew ? (body.provider === "codex" ? "codex" : "claude") : (s.agent.provider || "claude");
+  const model = String(body.model_free || body.model || "").trim();
+  const effort = okLevel(body.effort, LAUNCH_OPTIONS[provider].efforts);
+  const remember = { provider, model, effort, ...(isNew && body.prompt ? { prompt: String(body.prompt).slice(0, 4000) } : {}) };
+  try { updateRegistry(s.key, { file: s.resolved, launch: remember }); } catch {}
+  const back = `/session/${s.key}`;
+  const fail = (status, title, message, opts = {}) => ({ status, html: errorPage(title, message, opts, serverUp) });
+  await refreshLive(true);
+  if (isNew) {
+    const r = await startNewAgent({ provider, cwd: String(body.cwd || projectCwd(s)), planPath: s.resolved, planKey: s.key, model, effort, prompt: body.prompt }, { live: liveCache });
+    if (!r.ok) return fail(422, "Could not start a new session", r.error, { back: `${back}#launch` });
+    if (r.agent) { try { updateRegistry(s.key, { file: s.resolved, agent: r.agent }); } catch {} }
+    const note = `Started ${r.tmuxName} in Terminal.app${r.terminalError ? ` (the window did not open: ${r.terminalError}; attach with: tmux attach -t '=${r.tmuxName}')` : ""}. Its first prompt opens this plan in Lavish and polls it${r.provider === "codex" ? "; the Codex thread is matched by folder on that first poll" : ""}.`;
+    return { redirect: `${back}?notice=${encodeURIComponent(note)}#agent` };
+  }
+  // Resume: optionally a specific earlier session (from a transcript group), else the plan's current agent
+  const rec = wanted ? (s.agents.find((a) => a.id === wanted) || (s.reg.agent && s.reg.agent.id === wanted ? s.reg.agent : null)) : s.reg.agent;
+  if (wanted && !rec) return fail(404, "Unknown session", `No session ${wanted} is recorded on this plan.`, { back });
+  const r = await resumeAgent({ agent: rec }, s.key, { model, effort }, { live: liveCache, tmuxNames: liveCache.tmux });
+  if (!r.ok) return fail(422, "Could not resume", r.error, { back: `${back}#launch`, extra: `<p><a class="a" href="${back}#launch">Start a New session instead</a></p>` });
+  const lv = openLavish(s);
+  if (lv.error) return fail(500, "Terminal ready, Lavish did not open", `${r.action === "resume" ? `Resumed in ${r.tmuxName}. ` : ""}${lv.error}`, { back });
+  if (r.action === "lavish" || r.terminalError || r.note) {
+    const msg = r.action === "lavish" ? r.note : `${r.note || (r.action === "resume" ? `Resumed ${r.state.name} in terminal ${r.tmuxName}.` : `Terminal ${r.tmuxName}.`)}${r.terminalError ? ` Terminal.app did not open: ${r.terminalError}. Attach by hand: tmux attach -t '=${r.tmuxName}'` : ""}`;
+    return { status: 200, html: page("Resume", s.title, `<div class="errpage"><h1>${esc(s.title)}</h1><div class="notice ${r.terminalError ? "warn" : ""}">${esc(msg)}</div><p><a class="b" style="text-decoration:none;padding:6px 12px;border-radius:6px;background:var(--acc);color:var(--accInk)" href="${esc(lv.url)}">Open the plan in Lavish</a></p><p class="meta">Opens by itself in 5 s.</p><meta http-equiv="refresh" content="5;url=${esc(lv.url)}"><p class="meta"><a class="a" href="${back}">← Back to the plan page</a></p></div>`, serverUp) };
+  }
+  return { redirect: lv.url };
+}
 
 http.createServer(async (req, res) => {
   try {
@@ -1175,25 +1294,41 @@ http.createServer(async (req, res) => {
       return json(res, 200, { ...idx, current, round: roundOf(m[1]), home: `http://127.0.0.1:${PORT}` });
     }
     if (path === "/api/sessions") return json(res, 200, loadSessions().map((s) => ({ key: s.key, title: s.title, project: s.project, file: s.resolved || s.file, status: s.status, plan: s.plan.status, priority: s.plan.priority, stage: s.plan.stage, progress: s.plan.progress.latest, session: s.plan.session, unsent: s.unsentCount, prs: s.plan.prs.map((p) => p.n), updated: s.updated, url: s.url, versions: s.versionCount, privateNotes: s.privateNotes,
-      folder: s.folder ? { id: s.folder, name: s.folderPath[s.folderPath.length - 1]?.name || "", path: s.folderPath.map((f) => f.name).join(" › ") } : null,
-      agent: s.agent.state === "none" ? null : { provider: s.agent.provider, id: s.agent.id, state: s.agent.state, name: s.agent.name, terminal: s.agent.terminal, tmuxName: s.agent.tmuxName, entrypoint: s.agent.entrypoint, cwd: s.agent.cwd, source: s.agent.source, at: s.agent.at } })));
+      tags: s.tags, tabs: s.tabs, build: s.plan.build.key, added: s.added,
+      agent: s.agent.state === "none" ? null : { provider: s.agent.provider, id: s.agent.id, state: s.agent.state, name: s.agent.name, model: s.agent.model, terminal: s.agent.terminal, tmuxName: s.agent.tmuxName, entrypoint: s.agent.entrypoint, cwd: s.agent.cwd, source: s.agent.source, at: s.agent.at } })));
     if (path === "/api/layout") {
       if (req.method === "GET") return json(res, 200, layoutJson(loadSessions()));
       if (req.method === "PUT") {
         const b = parseBody(await readBody(req), req.headers["content-type"]);
         try {
-          if (b.op === "file") filePlan(String(b.key || ""), String(b.fid || ""));
-          else if (b.op === "move") moveFolder(String(b.fid || ""), String(b.parent || ""));
-          else if (b.op === "create") createFolder(String(b.name || ""), String(b.parent || ""));
-          else if (b.op === "rename") renameFolder(String(b.fid || ""), String(b.name || ""));
-          else if (b.op === "delete") deleteFolder(String(b.fid || ""));
-          else return json(res, 400, { error: "op must be file, move, create, rename or delete" });
+          if (b.op === "tag") tagPlan(String(b.key || ""), String(b.tid || ""), true);
+          else if (b.op === "untag") tagPlan(String(b.key || ""), String(b.tid || ""), false);
+          else if (b.op === "tag-create") createTag(String(b.name || ""));
+          else if (b.op === "tag-rename") renameTag(String(b.tid || ""), String(b.name || ""));
+          else if (b.op === "tag-delete") deleteTag(String(b.tid || ""));
+          else if (b.op === "order-projects") setProjectOrder(Array.isArray(b.names) ? b.names : []);
+          else if (b.op === "order-plans") setPlanOrder(String(b.project || ""), Array.isArray(b.keys) ? b.keys : []);
+          else return json(res, 400, { error: "op must be tag, untag, tag-create, tag-rename, tag-delete, order-projects or order-plans" });
         } catch (e) { return json(res, 400, { error: e.message }); }
         const sessions = loadSessions();
-        const moved = b.op === "file" ? sessions.find((x) => x.key === b.key) : null;
-        return json(res, 200, { ...layoutJson(sessions), folderHtml: moved ? folderCellHtml(moved) : "" });
+        const touched = b.op === "tag" || b.op === "untag" ? sessions.find((x) => x.key === b.key) : null;
+        return json(res, 200, { ...layoutJson(sessions), tagsHtml: touched ? tagsCellHtml(touched) : "" });
       }
       return json(res, 405, { error: "GET or PUT" });
+    }
+    if ((m = /^\/api\/presence\/([0-9a-f]{16})$/.exec(path))) {
+      if (req.method === "GET") return json(res, 200, { tabs: presenceTabs(m[1]).filter((t) => !t.close).map((t) => ({ tab: t.tab, at: new Date(t.at).toISOString(), title: t.title })) });
+      if (req.method !== "PUT" && req.method !== "POST") return json(res, 405, { error: "GET, PUT or POST" });
+      const gone = url.searchParams.get("gone") === "1";
+      const b = gone ? { tab: url.searchParams.get("tab") } : parseBody(await readBody(req), req.headers["content-type"]);
+      const tab = String(b.tab || "").slice(0, 40); if (!tab) return json(res, 400, { error: "tab id needed" });
+      if (!presence.has(m[1])) presence.set(m[1], new Map());
+      const tabs = presence.get(m[1]);
+      if (gone) { tabs.delete(tab); return json(res, 200, { gone: true }); }
+      const prev = tabs.get(tab);
+      if (prev && prev.close) { tabs.delete(tab); return json(res, 200, { close: true, reason: prev.close }); }
+      tabs.set(tab, { at: Date.now(), title: String(b.title || "").slice(0, 200), close: "" });
+      return json(res, 200, { close: false, tabs: presenceCount(m[1]) });
     }
 
     if ((m = /^\/export-tmp\/([0-9a-f]{16})\/(tmp-[a-z0-9]+\.html)$/.exec(path))) {
@@ -1217,7 +1352,8 @@ http.createServer(async (req, res) => {
     if ((m = /^\/view\/([0-9a-f]{16})$/.exec(path))) return redirect(res, `${path}/`);
     if ((m = /^\/version\/([0-9a-f]{16})\/(\d+)\/(.*)$/.exec(path))) {
       const s = sessions.find((x) => x.key === m[1]); if (!s) return send(res, 404, "text/plain", "no such session");
-      if (!m[3]) return serveVersion(res, s, Number(m[2]));
+      if (!m[3]) { const html = renderVersionView(s, Number(m[2]), serverUp); return html ? send(res, 200, "text/html; charset=utf-8", html) : send(res, 404, "text/plain", "no such version"); }
+      if (m[3] === "raw") return serveVersion(res, s, Number(m[2]));
       return serveVersionAsset(res, s, m[3]);
     }
     if ((m = /^\/version\/([0-9a-f]{16})\/(\d+)$/.exec(path))) return redirect(res, `${path}/`);
@@ -1231,34 +1367,8 @@ http.createServer(async (req, res) => {
       if (req.method === "GET") return redirect(res, `/session/${s.key}#launch`);
       if (req.method !== "POST") return send(res, 405, "text/plain", "GET or POST");
       const body = parseBody(await readBody(req), req.headers["content-type"]);
-      const isNew = url.searchParams.get("new") === "1";
-      const provider = isNew ? (body.provider === "codex" ? "codex" : "claude") : (s.agent.provider || "claude");
-      const model = String(body.model_free || body.model || "").trim();
-      const effort = okLevel(body.effort, LAUNCH_OPTIONS[provider].efforts);
-      const remember = { provider, model, effort, ...(isNew && body.prompt ? { prompt: String(body.prompt).slice(0, 4000) } : {}) };
-      try { updateRegistry(s.key, { file: s.resolved, launch: remember }); } catch {}
-      const back = `/session/${s.key}`;
-      await refreshLive(true);
-      if (isNew) {
-        const r = await startNewAgent({ provider, cwd: String(body.cwd || projectCwd(s)), planPath: s.resolved, planKey: s.key, model, effort, prompt: body.prompt }, { live: liveCache });
-        if (!r.ok) return send(res, 422, "text/html; charset=utf-8", errorPage("Could not start a new session", r.error, { back: `/session/${s.key}#launch` }, serverUp));
-        if (r.agent) { try { updateRegistry(s.key, { file: s.resolved, agent: r.agent }); } catch {} }
-        const note = `Started ${r.tmuxName} in Terminal.app${r.terminalError ? ` (the window did not open: ${r.terminalError}; attach with: tmux attach -t '=${r.tmuxName}')` : ""}. Its first prompt opens this plan in Lavish and polls it${r.provider === "codex" ? "; the Codex thread is matched by folder on that first poll" : ""}.`;
-        return redirect(res, `${back}?notice=${encodeURIComponent(note)}#agent`);
-      }
-      // Resume: optionally a specific earlier session (from a transcript group), else the plan's current agent
-      const wanted = url.searchParams.get("agent") || "";
-      const rec = wanted ? (s.agents.find((a) => a.id === wanted) || (s.reg.agent && s.reg.agent.id === wanted ? s.reg.agent : null)) : s.reg.agent;
-      if (wanted && !rec) return send(res, 404, "text/html; charset=utf-8", errorPage("Unknown session", `No session ${wanted} is recorded on this plan.`, { back }, serverUp));
-      const r = await resumeAgent({ agent: rec }, s.key, { model, effort }, { live: liveCache, tmuxNames: liveCache.tmux });
-      if (!r.ok) return send(res, 422, "text/html; charset=utf-8", errorPage("Could not resume", r.error, { back: `/session/${s.key}#launch`, extra: `<p><a class="a" href="/session/${s.key}#launch">Start a New session instead</a></p>` }, serverUp));
-      const lv = openLavish(s);
-      if (lv.error) return send(res, 500, "text/html; charset=utf-8", errorPage("Terminal ready, Lavish did not open", `${r.action === "resume" ? `Resumed in ${r.tmuxName}. ` : ""}${lv.error}`, { back }, serverUp));
-      if (r.action === "lavish" || r.terminalError || r.note) {
-        const msg = r.action === "lavish" ? r.note : `${r.note || (r.action === "resume" ? `Resumed ${r.state.name} in terminal ${r.tmuxName}.` : `Terminal ${r.tmuxName}.`)}${r.terminalError ? ` Terminal.app did not open: ${r.terminalError}. Attach by hand: tmux attach -t '=${r.tmuxName}'` : ""}`;
-        return send(res, 200, "text/html; charset=utf-8", page("Resume", s.title, `<div class="errpage"><h1>${esc(s.title)}</h1><div class="notice ${r.terminalError ? "warn" : ""}">${esc(msg)}</div><p><a class="b" style="text-decoration:none;padding:6px 12px;border-radius:6px;background:var(--acc);color:var(--accInk)" href="${esc(lv.url)}">Open the plan in Lavish</a></p><p class="meta">Opens by itself in 5 s.</p><meta http-equiv="refresh" content="5;url=${esc(lv.url)}"><p class="meta"><a class="a" href="${back}">← Back to the plan page</a></p></div>`, serverUp));
-      }
-      return redirect(res, lv.url);
+      const out = await launchAction(s, { isNew: url.searchParams.get("new") === "1", body, wanted: url.searchParams.get("agent") || "" }, serverUp);
+      return out.redirect ? redirect(res, out.redirect) : send(res, out.status, "text/html; charset=utf-8", out.html);
     }
     if (req.method === "POST" && (m = /^\/effort\/([0-9a-f]{16})$/.exec(path))) {
       const s = sessions.find((x) => x.key === m[1]); if (!s) return send(res, 404, "text/plain", "no such session");
@@ -1285,24 +1395,58 @@ http.createServer(async (req, res) => {
       const names = hits.map((h) => `${agentLabel({ id: h.id, name: h.provider === "claude" ? liveCache.claude.find((l) => l.sessionId === h.id)?.name || "" : "" })}${h.provider === "codex" ? " (codex, guessed)" : ""}`);
       return redirect(res, `/session/${s.key}?scan=${encodeURIComponent(hits.length ? `Found ${hits.length} session(s) in the last 7 days of ${shortPath(projectCwd(s))}: ${names.join(", ")} (${Date.now() - started} ms). Dotted = from the scan; a real poll replaces it.` : `No session in the last 7 days of ${shortPath(projectCwd(s))} read or edited this plan through a path tool (${Date.now() - started} ms).`)}#agent`);
     }
-    if (req.method === "POST" && path === "/folders") {
+    if (req.method === "POST" && path === "/tags") {
       const b = parseBody(await readBody(req), req.headers["content-type"]);
-      try { const { fid } = createFolder(b.name, b.parent || ""); return redirect(res, `/?folder=${fid}`); } catch (e) { return send(res, 400, "text/html; charset=utf-8", errorPage("Could not create the folder", e.message, {}, serverUp)); }
+      try { const { tid } = createTag(b.name); return redirect(res, safeBack(url.searchParams.get("back"), `/?tag=${tid}`)); } catch (e) { return send(res, 400, "text/html; charset=utf-8", errorPage("Could not create the tag", e.message, {}, serverUp)); }
     }
-    if (req.method === "POST" && (m = /^\/folders\/([a-z0-9]{6,24})$/.exec(path))) {
+    if (req.method === "POST" && (m = /^\/tags\/([a-z0-9]{6,24})$/.exec(path))) {
       const b = parseBody(await readBody(req), req.headers["content-type"]);
-      const parent = layout.folders[m[1]]?.parent || "";
       try {
-        if (b.op === "rename") { renameFolder(m[1], b.name); return redirect(res, `/?folder=${m[1]}`); }
-        if (b.op === "move") { moveFolder(m[1], b.parent || ""); return redirect(res, `/?folder=${m[1]}`); }
-        if (b.op === "delete") { deleteFolder(m[1]); return redirect(res, parent ? `/?folder=${parent}` : "/"); }
-        return send(res, 400, "text/plain", "op must be rename, move or delete");
-      } catch (e) { return send(res, 400, "text/html; charset=utf-8", errorPage("Folder change refused", e.message, { back: `/?folder=${m[1]}` }, serverUp)); }
+        if (b.op === "rename") { renameTag(m[1], b.name); return redirect(res, `/?tag=${m[1]}`); }
+        if (b.op === "delete") { deleteTag(m[1]); return redirect(res, "/"); }
+        return send(res, 400, "text/plain", "op must be rename or delete");
+      } catch (e) { return send(res, 400, "text/html; charset=utf-8", errorPage("Tag change refused", e.message, { back: `/?tag=${m[1]}` }, serverUp)); }
     }
-    if (req.method === "POST" && (m = /^\/move\/([0-9a-f]{16})$/.exec(path))) {
+    if (req.method === "POST" && (m = /^\/tag\/([0-9a-f]{16})$/.exec(path))) {
       const b = parseBody(await readBody(req), req.headers["content-type"]);
-      try { filePlan(m[1], b.fid || ""); } catch (e) { return send(res, 400, "text/html; charset=utf-8", errorPage("Could not move the plan", e.message, {}, serverUp)); }
+      try { tagPlan(m[1], String(b.tid || ""), b.on !== "0"); } catch (e) { return send(res, 400, "text/html; charset=utf-8", errorPage("Could not tag the plan", e.message, {}, serverUp)); }
       return redirect(res, safeBack(url.searchParams.get("back"), `/session/${m[1]}`));
+    }
+    if (req.method === "POST" && (m = /^\/tabs\/([0-9a-f]{16})\/close$/.exec(path))) {
+      const tabs = presenceTabs(m[1]).filter((t) => !t.close).sort((a, b) => b.at - a.at);
+      const n = markTabs(m[1], "closed from the home page", { keep: tabs[0]?.tab || "" });
+      return redirect(res, safeBack(url.searchParams.get("back"), `/session/${m[1]}?notice=${encodeURIComponent(`${n} tab${n === 1 ? "" : "s"} told to close (each closes itself on its next ping, within 10 s).`)}`));
+    }
+    if (req.method === "POST" && (m = /^\/rename\/([0-9a-f]{16})$/.exec(path))) {
+      const s = sessions.find((x) => x.key === m[1]); if (!s || !s.exists) return send(res, 404, "text/plain", "no such session or file missing");
+      const b = parseBody(await readBody(req), req.headers["content-type"]);
+      const title = String(b.title || "").replace(/\s+/g, " ").trim().slice(0, 140);
+      if (!title) return send(res, 400, "text/html; charset=utf-8", errorPage("Rename refused", "A plan needs a title.", { back: `/session/${s.key}` }, serverUp));
+      if (title === s.title) return redirect(res, `/session/${s.key}`);
+      snapshotVersion(s.resolved, s.key, { reason: "pre-rename", label: `before rename (${s.title})` });
+      let html = readFileSync(s.resolved, "utf8");
+      html = /<title>[^<]*<\/title>/i.test(html) ? html.replace(/<title>[^<]*<\/title>/i, () => `<title>${esc(title)}</title>`) : html.replace(/<head[^>]*>/i, (h) => `${h}<title>${esc(title)}</title>`);
+      writeFileSync(s.resolved, html);
+      snapshotVersion(s.resolved, s.key, { reason: "rename", label: `renamed: ${title}` });
+      appendHistory(s.key, s.resolved, { role: "system", kind: "rename", text: `renamed from “${s.title}” to “${title}” on the home page` });
+      seenMtime.delete(s.key);
+      return redirect(res, `/session/${s.key}?notice=${encodeURIComponent(`Renamed to “${title}”. The Lavish tab shows the new title after a reload.`)}`);
+    }
+    if (req.method === "POST" && (m = /^\/restart\/([0-9a-f]{16})$/.exec(path))) {
+      const s = sessions.find((x) => x.key === m[1]); if (!s || !s.exists) return send(res, 404, "text/plain", "no such session or file missing");
+      const back = `/session/${s.key}`;
+      await refreshLive(true);
+      const st = agentState(s.reg, liveCache, liveCache.tmux);
+      if (st.state === "active") return send(res, 409, "text/html; charset=utf-8", errorPage("Restart refused", `Session ${st.name} is live in ${st.terminal ? `terminal ${st.tmuxName}` : st.entrypointLabel || "another process"}. End it there first, then Restart: a second agent on the same plan would fight the first. Nothing was started.`, { back }, serverUp));
+      let endNote = "";
+      if (s.status !== "ended") { const r = spawnSync("lavish-axi", ["end", s.resolved], { encoding: "utf8", env: localBinEnv(), timeout: 60000 }); if (r.status !== 0) endNote = ` (lavish-axi end failed: ${(r.stderr || r.stdout || "").trim().slice(0, 200)})`; }
+      const closed = markTabs(s.key, "restarted from the home page");
+      const l = s.reg.launch || {};
+      const provider = l.provider || st.provider || "claude";
+      const r = await startNewAgent({ provider, cwd: projectCwd(s), planPath: s.resolved, planKey: s.key, model: l.model, effort: l.effort }, { live: liveCache });
+      if (!r.ok) return send(res, 422, "text/html; charset=utf-8", errorPage("Could not restart", `The Lavish session was ended${endNote} and ${closed} tab${closed === 1 ? "" : "s"} told to close, but no new session started: ${r.error}`, { back }, serverUp));
+      try { if (r.agent) updateRegistry(s.key, { file: s.resolved, agent: r.agent }); updateRegistry(s.key, { file: s.resolved, progress: `restarted by the home page: ${r.tmuxName} (${provider}${l.model ? `, ${l.model}` : ""})${closed ? ` · ${closed} tab${closed === 1 ? "" : "s"} told to close` : ""}`, session: { label: "home page", host: os.hostname().replace(/\.local$/, "") } }); } catch {}
+      return redirect(res, `${back}?notice=${encodeURIComponent(`Restarted: Lavish session ended${endNote}, ${closed} tab${closed === 1 ? "" : "s"} told to close, ${r.tmuxName} started in Terminal.app${r.terminalError ? ` (the window did not open: ${r.terminalError}; attach with: tmux attach -t '=${r.tmuxName}')` : ""}. Its first prompt reopens this plan in Lavish and polls it.`)}#agent`);
     }
     if ((m = /^\/export\/([0-9a-f]{16})$/.exec(path))) {
       const s = sessions.find((x) => x.key === m[1]); if (!s || !s.exists) return send(res, 404, "text/plain", "no such session or file missing");
@@ -1333,11 +1477,18 @@ http.createServer(async (req, res) => {
       const s = sessions.find((x) => x.key === m[1]); const n = Number(m[2]);
       if (!s || !s.exists) return send(res, 404, "text/plain", "no such session or file missing");
       if (!s.versions.find((v) => v.n === n) || !existsSync(versionPath(s.key, n))) return send(res, 404, "text/plain", "no such version");
+      const then = url.searchParams.get("then") || "";
       snapshotVersion(s.resolved, s.key, { reason: "pre-restore" });
       copyFileSync(versionPath(s.key, n), s.resolved);
       snapshotVersion(s.resolved, s.key, { reason: "restore", label: `restored v${n}` });
-      appendHistory(s.key, s.resolved, { role: "system", kind: "restore", text: `restored v${n} from the home page` });
+      appendHistory(s.key, s.resolved, { role: "system", kind: "restore", text: `restored v${n} from the home page${then ? ` (then: ${then === "new" ? "new session" : "resume"})` : ""}` });
       seenMtime.delete(s.key);
+      if (then === "resume" || then === "new") {
+        const fresh = loadSessions().find((x) => x.key === s.key) || s;
+        const l = fresh.reg.launch || {};
+        const out = await launchAction(fresh, { isNew: then === "new", body: { provider: l.provider || fresh.agent.provider || "claude", model: l.model || "", effort: l.effort || "", prompt: l.prompt || "", cwd: projectCwd(fresh) }, wanted: "" }, serverUp);
+        return out.redirect ? redirect(res, out.redirect) : send(res, out.status, "text/html; charset=utf-8", out.html);
+      }
       return redirect(res, `/session/${s.key}?restored=${n}#versions`);
     }
     if (req.method === "POST" && (m = /^\/status\/([0-9a-f]{16})$/.exec(path))) {
@@ -1359,7 +1510,7 @@ http.createServer(async (req, res) => {
       const cmdArgs = m[1] === "end" ? ["end", file] : [file, "--no-open", ...(s.endedBy === "user" ? ["--reopen"] : [])];
       const r = spawnSync("lavish-axi", cmdArgs, { encoding: "utf8", env: localBinEnv(), timeout: 60000 });
       if (r.status !== 0) return send(res, 500, "text/plain; charset=utf-8", `lavish-axi ${cmdArgs.join(" ")} failed:\n${r.stdout}\n${r.stderr}`);
-      if (m[1] === "end") return redirect(res, "/");
+      if (m[1] === "end") { if (url.searchParams.get("close") === "1") markTabs(s.key, "session ended"); return redirect(res, safeBack(url.searchParams.get("back"), "/")); }
       const fresh = loadSessions().find((x) => x.resolved === file || x.file === file);
       return redirect(res, fresh?.url || "/");
     }

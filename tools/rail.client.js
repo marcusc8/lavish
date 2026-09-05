@@ -850,4 +850,28 @@
   refreshVersions({ snapshot: true });
   refreshRegistry();
   window.__lavishLocalRail = { sigOf, sent: () => sentSigs, addPrivate, notes: () => notes, cards, render: renderRail, requestAnchors, select: selectCard, setMode, setFilter, attachFiles, refreshVersions, versions: () => versionIndex, refreshRegistry, registry: () => registryInfo, mirror: readMirror, homeCopies: () => homeCopies, revalidate: revalidateAttachments, restore: () => restoreFromMirror(readMirror(), { force: true }), pullQueue, open: (v = true) => setRailOpen(v) };
+  /* ── presence: this tab tells the home page it is open on this plan (every 10 s, plan 2026-09-05 D6) ──────────
+   * The home page counts the tabs per plan and, on "End session and close tabs" / "Close other tabs" / Restart, marks
+   * them; a marked tab's next ping answers {close:true} and the tab closes itself (a page can close only itself). */
+  (function lavishLocalPresence() {
+    let stopped = false;
+    const url = HOME + "/api/presence/" + encodeURIComponent(key);
+    async function ping() {
+      if (stopped) return;
+      try {
+        const r = await fetch(url, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ tab: tabId, at: now(), title: document.title }) });
+        if (!r.ok) return;
+        const j = await r.json();
+        if (j && j.close) {
+          stopped = true;
+          window.close();
+          setTimeout(() => { if (!document.hidden) showRailNotice("The home page asked this tab to close (" + (j.reason || "session ended") + "). The browser kept it open: close it by hand.", { kind: "info" }); }, 600);
+        }
+      } catch { /* home page down: nothing to report */ }
+    }
+    ping();
+    setInterval(ping, 10000);
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") ping(); });
+    window.addEventListener("pagehide", () => { try { if (navigator.sendBeacon) navigator.sendBeacon(url + "?gone=1&tab=" + encodeURIComponent(tabId), ""); } catch { /* ignore */ } });
+  })();
 })();
