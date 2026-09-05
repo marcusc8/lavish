@@ -6,15 +6,17 @@
  * registry (lavish-meta; since 2026-09-04 also the AGENT link: which Claude / Codex session polled the plan)
  * and the reviewer's folders (home-layout.json), and serves:
  *
- *   /                         every plan: sidebar (All plans · per-project · your folders), live-sessions strip, folder tiles, table
- *   /?folder=<fid>|project=<p> one folder or one project's unfiled plans
- *   /session/<key>            transcript grouped per agent session, Agent block (Resume · New session · Change effort · Find sessions),
- *                             plan-status form, versions (view / diff / restore), commits, private comments, export
+ *   /                         every plan (Drive-style, plan 2026-09-05): sidebar (All plans · Active now · projects with their plans nested ·
+ *                             tags), filter popovers, one table per project (Plan · Plan status · Build · Session · Modified · Added · Actions,
+ *                             more from the Columns button), 5 rows per project on the home view + Show more
+ *   /?folder=<fid>|project=<p>|agent=…&stage=…&plan=…&prio=…&status=…   one tag, one project, or a filtered list
+ *   /session/<key>            the plan page: stage line, Agent block + plan-status form, Resume + New session, Sessions, History,
+ *                             versions (view / diff / continue from), commits, export, the conversation with private comments in place
  *   /session/<key>.md         the transcript as Markdown (download)
  *   /view/<key>/              the plan itself, read-only, no Lavish chrome, no state change; /view/<key>/<sibling asset> (siblings only)
  *   /version/<key>/<n>/       a saved version of the artifact, read-only, with its relative assets
  *   /diff/<key>/<a>/<b>       what changed between two versions (b may be "current")
- *   GET  /connect/<key>[?new=1]  the Resume / New session form (provider, model, effort, prompt; remembered per plan)
+ *   GET  /connect/<key>       redirects to the plan page's Resume + New session block
  *   POST /connect/<key>       Resume the plan's agent: live in tmux → bring Terminal forward · live in an editor → Lavish only ·
  *                             ended → tmux mm-<provider>-<8> running the CLI's own resume, Terminal.app attached, then Lavish.
  *                             Every refusal is a page naming the reason; a live session is never resumed twice.
@@ -72,12 +74,13 @@ const LIVE_TTL_MS = 3_000;
    checkContrast() computes WCAG relative luminance for each pair in BOTH palettes and refuses to start below 4.5:1.
    Changing a colour therefore either passes the gate or stops the server with the failing pair named. */
 export const PALETTES = {
-  light: { paper: "#faf9f6", surface: "#ffffff", tint: "#f1efe9", hover: "#f3f1ec", ink: "#1c1b1a", ink2: "#4a4845", ink3: "#66635d", rule: "#e6e3dd", acc: "#1f4e79", accInk: "#ffffff", accSoft: "#e4ecf4", good: "#2a6f46", goodInk: "#ffffff", goodSoft: "#e3f0e6", warn: "#7d6119", warnSoft: "#f6efdc", bad: "#9b3b2e", badSoft: "#f5e4e0", viol: "#4b3a8a", violSoft: "#e8e3f5", bar: "#1c1b1a", barInk: "#f3f1ec", barMute: "#b8b3aa", focus: "#1f4e79" },
-  dark: { paper: "#15161a", surface: "#1e2026", tint: "#24262d", hover: "#282a32", ink: "#e8e6e1", ink2: "#c2beb6", ink3: "#9c988f", rule: "#2e3037", acc: "#6ea8ff", accInk: "#0b1220", accSoft: "#1f2b40", good: "#7fd69a", goodInk: "#0b1a10", goodSoft: "#1c2f24", warn: "#e2c06a", warnSoft: "#332b18", bad: "#f08a7a", badSoft: "#3a2220", viol: "#b9a8f5", violSoft: "#2a2440", bar: "#0f1013", barInk: "#e8e6e1", barMute: "#9c988f", focus: "#6ea8ff" },
+  // Direction A ("Sheet", plan 2026-09-05): white ground, #f6f7f9 second surface, deep blue accent, white top bar.
+  light: { paper: "#ffffff", surface: "#ffffff", tint: "#f6f7f9", hover: "#f2f4f7", ink: "#1a1d21", ink2: "#4b525a", ink3: "#626972", rule: "#e5e7eb", acc: "#1d4f91", accInk: "#ffffff", accSoft: "#e8eef7", good: "#1f7a44", goodInk: "#ffffff", goodSoft: "#e6f4ea", warn: "#8a5a00", warnSoft: "#fdf3d8", bad: "#b3261e", badSoft: "#fbe9e7", viol: "#5b3fa6", violSoft: "#ece7f8", bar: "#ffffff", barInk: "#1a1d21", barMute: "#626972", focus: "#1d4f91" },
+  dark: { paper: "#15161a", surface: "#1e2026", tint: "#24262d", hover: "#282a32", ink: "#e8e6e1", ink2: "#c2beb6", ink3: "#9c988f", rule: "#2e3037", acc: "#6ea8ff", accInk: "#0b1220", accSoft: "#1f2b40", good: "#7fd69a", goodInk: "#0b1a10", goodSoft: "#1c2f24", warn: "#e2c06a", warnSoft: "#332b18", bad: "#f08a7a", badSoft: "#3a2220", viol: "#b9a8f5", violSoft: "#2a2440", bar: "#1e2026", barInk: "#e8e6e1", barMute: "#9c988f", focus: "#6ea8ff" },
 };
 const PAIRS = [["ink", "paper"], ["ink", "surface"], ["ink", "tint"], ["ink", "hover"], ["ink2", "paper"], ["ink2", "surface"], ["ink2", "tint"], ["ink2", "hover"], ["ink3", "paper"], ["ink3", "surface"], ["ink3", "tint"], ["ink3", "hover"],
-  ["acc", "paper"], ["acc", "surface"], ["acc", "accSoft"], ["acc", "tint"], ["accInk", "acc"], ["good", "goodSoft"], ["good", "paper"], ["good", "surface"], ["goodInk", "good"], ["warn", "warnSoft"], ["warn", "paper"], ["warn", "surface"],
-  ["bad", "badSoft"], ["bad", "paper"], ["bad", "surface"], ["viol", "violSoft"], ["viol", "paper"], ["barInk", "bar"], ["barMute", "bar"]];
+  ["acc", "paper"], ["acc", "surface"], ["acc", "accSoft"], ["acc", "tint"], ["acc", "hover"], ["accInk", "acc"], ["good", "goodSoft"], ["good", "paper"], ["good", "surface"], ["good", "tint"], ["good", "hover"], ["goodInk", "good"], ["warn", "warnSoft"], ["warn", "paper"], ["warn", "surface"], ["warn", "tint"], ["warn", "hover"],
+  ["bad", "badSoft"], ["bad", "paper"], ["bad", "surface"], ["bad", "tint"], ["bad", "hover"], ["viol", "violSoft"], ["viol", "paper"], ["viol", "surface"], ["barInk", "bar"], ["barMute", "bar"], ["barInk", "tint"], ["barMute", "tint"], ["ink3", "accSoft"], ["ink2", "accSoft"]];
 const MONO = { light: { s: 45, lBg: 88, lFg: 26 }, dark: { s: 35, lBg: 24, lFg: 84 } }; // monogram discs: hsl(h s lBg) under hsl(h s lFg)
 function hexRgb(h) { const s = h.replace("#", ""); return [0, 2, 4].map((i) => parseInt(s.slice(i, i + 2), 16) / 255); }
 function hslRgb(h, s, l) { s /= 100; l /= 100; const k = (n) => (n + h / 30) % 12; const a = s * Math.min(l, 1 - l); const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1))); return [f(0), f(8), f(4)]; }
@@ -95,7 +98,6 @@ export function checkContrast(min = 4.5) {
 }
 const tokenCss = (p) => Object.entries(p).map(([k, v]) => `--${k}:${v}`).join(";");
 const THEME_CSS = `:root{${tokenCss(PALETTES.light)}}:root[data-theme=dark]{${tokenCss(PALETTES.dark)}}@media(prefers-color-scheme:dark){:root:not([data-theme=light]){${tokenCss(PALETTES.dark)}}}`;
-const MONO_CSS = `.mg{background:hsl(var(--h) ${MONO.light.s}% ${MONO.light.lBg}%);color:hsl(var(--h) ${MONO.light.s}% ${MONO.light.lFg}%)}:root[data-theme=dark] .mg{background:hsl(var(--h) ${MONO.dark.s}% ${MONO.dark.lBg}%);color:hsl(var(--h) ${MONO.dark.s}% ${MONO.dark.lFg}%)}@media(prefers-color-scheme:dark){:root:not([data-theme=light]) .mg{background:hsl(var(--h) ${MONO.dark.s}% ${MONO.dark.lBg}%);color:hsl(var(--h) ${MONO.dark.s}% ${MONO.dark.lFg}%)}}`;
 if (process.argv.includes("--check-contrast")) { const f = checkContrast(); console.log(f.length ? f.join("\n") : `contrast ok: ${PAIRS.length} pairs × ${Object.keys(PALETTES).length} palettes + monograms ≥ 4.5:1`); process.exit(f.length ? 1 : 0); }
 
 /* ── live sessions cache (pid files, Codex locks, tmux names) ────────── */
@@ -128,6 +130,8 @@ function loadSessions() {
     const userSent = history.filter((h) => h.role === "user").length || chat.filter((c) => c.role === "user").length;
     const agentMsgs = chat.filter((c) => c.role === "agent").length;
     const fid = layout.plans[key] || "";
+    const birth = (() => { try { return resolved ? statSync(resolved).birthtime.toISOString() : ""; } catch { return ""; } })();
+    const added = [versions[0]?.at, history[0]?.at, birth].filter(Boolean).sort()[0] || "";
     const session = {
       key, file: s.file, resolved, exists: Boolean(resolved), moved: Boolean(resolved && resolved !== s.file),
       project: head.project || (m ? m[1] : "other"), worktree, related: head.related || [], logo: head.logo || "",
@@ -141,7 +145,7 @@ function loadSessions() {
       versions, versionCount: versions.length,
       stale: (s.status !== "ended") && (Date.now() - updated.getTime()) / 864e5 > STALE_DAYS,
       chat, history, head, reg,
-      folder: fid, folderPath: fid ? folderPath(layout, fid) : [],
+      folder: fid, folderPath: fid ? folderPath(layout, fid) : [], added,
       agent: agentState(reg, liveCache, liveCache.tmux),
       agents: Array.isArray(reg.agents) ? reg.agents : [],
     };
@@ -172,8 +176,10 @@ function derivePlan(s) {
   const unworked = ["not-started", "in-review", "approved"].includes(status);
   const st = stageOf(status);
   const progress = progressSummary(s.reg, list, 20);
+  const build = buildOf(status, list);
+  const firstStatus = (want) => (s.reg.progress || []).find((e) => e.kind === "status" && e.status === want)?.at || "";
   return {
-    status, inferred, note, priority, unworked, prs: list, summary: s.reg.summary || s.head.summary || "", webBase: s.resolved ? gitInfo(s.resolved).webBase : "",
+    status, inferred, note, priority, unworked, prs: list, build, completedAt: firstStatus("implemented"), retiredAt: firstStatus("retired"), summary: s.reg.summary || s.head.summary || "", webBase: s.resolved ? gitInfo(s.resolved).webBase : "",
     stage: st.stage, stageLabel: st.label, stageIndex: st.index, stageInferred: inferred, stageNote: note, subLabel: subLabelOf(status, list),
     session: s.reg.session || null, progress,
   };
@@ -296,113 +302,214 @@ const fmt = (d) => { const t = new Date(d); if (isNaN(t)) return ""; const today
 const fmtDay = (d) => { const t = new Date(d); if (isNaN(t)) return ""; const today = new Date().toDateString() === t.toDateString(); return today ? `today ${t.toTimeString().slice(0, 5)}` : t.toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
 const ago = (d) => { const ms = Date.now() - new Date(d).getTime(); if (!Number.isFinite(ms) || ms < 0) return ""; const m = Math.round(ms / 60e3); if (m < 1) return "just now"; if (m < 60) return `${m} min ago`; const h = Math.round(m / 60); if (h < 36) return `${h} h ago`; return `${Math.round(h / 24)} d ago`; };
 const kb = (b) => `${Math.round(b / 1024)} KB`;
-const hue = (s) => { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h % 360; };
-const initials = (name) => { const w = String(name || "?").replace(/[-_.]/g, " ").trim().split(/\s+/).filter(Boolean); return (w.length > 1 ? w[0][0] + w[1][0] : String(w[0] || "?").slice(0, 2)).toUpperCase(); };
-/** A generated monogram disc; a project may override it with <meta name="lavish:logo" content="assets/logo.svg"> (served as a sibling of the plan). */
-const monogram = (name, { logo = "", key = "", size = 28 } = {}) => logo && key ? `<img class="mg mg-img" src="/view/${key}/${esc(logo)}" alt="${esc(name)}" width="${size}" height="${size}" style="--h:${hue(name)}">` : `<span class="mg" style="--h:${hue(name)};width:${size}px;height:${size}px;font-size:${Math.round(size * 0.4)}px" title="${esc(name)}">${esc(initials(name))}</span>`;
+const PRIO_RANK = { high: 0, normal: 1, low: 2 };
 const glyph = (provider) => (provider === "codex" ? '<span class="pv" title="Codex">⌘</span>' : '<span class="pv" title="Claude">◆</span>');
+/* Icons (inline SVG, currentColor): the sidebar's folder (closed / open), All plans, Active now, a tag. */
+const ICON = {
+  all: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>',
+  active: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/><path d="M4.9 4.9a10 10 0 0 1 14.2 0M7.8 7.8a6 6 0 0 1 8.4 0M4.9 19.1a10 10 0 0 0 14.2 0M7.8 16.2a6 6 0 0 0 8.4 0"/></svg>',
+  folder: '<svg class="fc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
+  folderOpen: '<svg class="fo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1H7.5a2 2 0 0 0-1.9 1.4L3 18z"/><path d="M3 18l2.6-7.6A2 2 0 0 1 7.5 9H22l-2.7 8.1a2 2 0 0 1-1.9 1.4H5"/></svg>',
+  tag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/></svg>',
+  hide: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>',
+};
+/** Model ids → the names Marcus reads (CS3 moves this list to ~/.lavish-axi/models.json). */
+const MODEL_NAMES = { fable: "Fable 5.1", "claude-fable-5-1": "Fable 5.1", opus: "Opus 5", "claude-opus-5": "Opus 5", sonnet: "Sonnet 5", "claude-sonnet-5": "Sonnet 5", haiku: "Haiku 4.5", "claude-haiku-4-5": "Haiku 4.5", "claude-haiku-4-5-20251001": "Haiku 4.5", "gpt-6-astra": "GPT-6 Astra", "gpt-6-sol": "GPT-6 Sol", "gpt-6-terra": "GPT-6 Terra", "gpt-6-luna": "GPT-6 Luna" };
+const modelName = (id) => { const s = String(id || "").trim(); if (!s || s === "default") return ""; return MODEL_NAMES[s] || MODEL_NAMES[s.toLowerCase()] || s; };
+/** The Build column (D4): what the PRs and the status say about the implementation, as a word with a rank for sorting. */
+const BUILDS = [["not-started", "Not started", "mute"], ["developing", "Developing", "warn"], ["pr-open", "PR open", "acc"], ["merging", "Merging", "acc"], ["merged", "Merged", "good"], ["needs-review", "Needs review", "viol"], ["verified", "Verified", "good"]];
+function buildOf(status, prs) {
+  const merged = prs.filter((p) => p.state === "MERGED").length, open = prs.filter((p) => p.state === "OPEN").length;
+  let key, why;
+  if (status === "implemented") { key = "verified"; why = "status implemented (verified live)"; }
+  else if (status === "merged") { key = "needs-review"; why = "status merged: on main, awaiting verification"; }
+  else if (prs.length && merged === prs.length) { key = "merged"; why = `every PR merged (${merged})`; }
+  else if (merged && open) { key = "merging"; why = `${merged} merged, ${open} open`; }
+  else if (merged) { key = "merged"; why = `${merged} merged, the rest closed`; }
+  else if (open) { key = "pr-open"; why = `${open} PR${open === 1 ? "" : "s"} open, none merged`; }
+  else if (status === "in-progress") { key = "developing"; why = "status in progress, no PR yet"; }
+  else { key = "not-started"; why = prs.length ? "PRs recorded but none open or merged" : "no PR and not in progress"; }
+  const i = BUILDS.findIndex((b) => b[0] === key);
+  return { key, label: BUILDS[i][1], tone: BUILDS[i][2], rank: i, why };
+}
+const STATUS_WORDS = { "not-started": ["Not started", "mute"], "in-review": ["In review", "acc"], approved: ["Approved", "good"], "in-progress": ["In progress", "warn"], merged: ["Merged", "good"], implemented: ["Implemented", "good"], retired: ["Retired", "mute"], superseded: ["Superseded", "mute"] };
+const dotWord = (tone, label, title = "", inferred = false) => `<span class="dw ${esc(tone)}${inferred ? " inferred" : ""}" title="${esc(title)}"><i></i>${esc(label)}</span>`;
+/** The columns of the plan table. `on` = shown by default; the rest are recorded and available from the Columns button. */
+const COLUMNS = [
+  { k: "plan", label: "Plan", w: "27%", on: true, fixed: true },
+  { k: "status", label: "Plan status", w: "11%", on: true },
+  { k: "build", label: "Build", w: "11%", on: true },
+  { k: "session", label: "Session", w: "17%", on: true },
+  { k: "modified", label: "Modified", w: "11%", on: true },
+  { k: "added", label: "Added", w: "9%", on: true },
+  { k: "actions", label: "Actions", w: "14%", on: true, fixed: true, nosort: true },
+  { k: "folder", label: "Tags", w: "12%", on: false },
+  { k: "priority", label: "Priority", w: "8%", on: false },
+  { k: "project", label: "Project", w: "12%", on: false },
+  { k: "completed", label: "Completed", w: "9%", on: false },
+  { k: "retired", label: "Retired", w: "9%", on: false },
+  { k: "versions", label: "Versions", w: "8%", on: false },
+  { k: "reviews", label: "Reviews", w: "12%", on: false },
+];
 const CSS = `
 ${THEME_CSS}
-*{box-sizing:border-box;min-width:0}html{color-scheme:light dark}body{margin:0;background:var(--paper);color:var(--ink);font:14px/1.5 "Public Sans",system-ui,sans-serif}
-a{color:var(--acc)}button{font:inherit}
-.top{display:flex;align-items:center;gap:14px;padding:8px 18px;background:var(--bar);color:var(--barInk);position:sticky;top:0;z-index:5}.top a{color:inherit;text-decoration:none}.logo{display:flex;align-items:center;gap:9px;font-family:Newsreader,Georgia,serif;font-style:italic;font-size:19px}.logo .mg{font-style:normal;font-family:"Public Sans",system-ui,sans-serif;font-weight:700}.crumb{font-size:12px;color:var(--barMute)}.sp{flex:1}
-.pill{font-size:11px;padding:2px 8px;border-radius:999px;background:var(--tint);color:var(--ink2)}.top .pill{background:rgba(255,255,255,.12);color:var(--barInk)}.top .pill.on{background:var(--good);color:var(--goodInk)}.top .pill.off{background:var(--bad);color:#fff}
-.search{flex:0 1 320px;display:flex;align-items:center;gap:6px;background:rgba(255,255,255,.1);border-radius:8px;padding:4px 10px}.search input{flex:1;background:transparent;border:0;color:var(--barInk);font:inherit;font-size:13px;outline:0}.search input::placeholder{color:var(--barMute)}
-.tbtn{background:transparent;border:1px solid rgba(255,255,255,.18);color:var(--barInk);border-radius:8px;padding:3px 9px;cursor:pointer;font-size:13px}.tbtn:hover{background:rgba(255,255,255,.1)}
-.shell{display:grid;grid-template-columns:232px minmax(0,1fr);min-height:calc(100vh - 44px)}@media(max-width:900px){.shell{grid-template-columns:minmax(0,1fr)}.side{display:none}}
-.side{border-right:1px solid var(--rule);padding:14px 10px 40px;background:var(--surface);position:sticky;top:44px;align-self:start;max-height:calc(100vh - 44px);overflow:auto}
-.side h4{margin:14px 10px 4px;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);font-weight:700}
-.nav{display:flex;align-items:center;gap:8px;padding:5px 10px;border-radius:8px;color:var(--ink2);text-decoration:none;font-size:13px;cursor:pointer;border:1px dashed transparent}.nav:hover{background:var(--hover)}.nav.on{background:var(--accSoft);color:var(--acc);font-weight:600}.nav .n{margin-left:auto;font-size:11px;color:var(--ink3);font-variant-numeric:tabular-nums}.nav.on .n{color:var(--acc)}.nav .ic{width:16px;text-align:center;color:var(--ink3)}.nav.on .ic{color:var(--acc)}
-.nav.over{border-color:var(--acc);background:var(--accSoft)}.nav.nodrop{opacity:.35}.nav.sub{padding-left:26px}.nav.sub2{padding-left:42px}.nav.sub3{padding-left:58px}
-.newf{display:flex;gap:6px;margin:8px 10px 0}.newf input{flex:1;font:inherit;font-size:12.5px;padding:4px 7px;border:1px solid var(--rule);border-radius:7px;background:var(--paper);color:var(--ink)}.newf button{font-size:12px;padding:4px 9px;border:1px solid var(--acc);border-radius:7px;background:var(--acc);color:var(--accInk);cursor:pointer}
-main{padding:18px 22px 80px;max-width:1400px}.crumbs{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink3);margin:0 0 6px}.crumbs a{color:var(--ink2);text-decoration:none}.crumbs a:hover{text-decoration:underline}.crumbs b{color:var(--ink)}
-h1{font-family:Newsreader,Georgia,serif;font-weight:600;font-size:24px;margin:0 0 4px}h2{font-family:Newsreader,Georgia,serif;font-weight:600;font-size:19px;margin:28px 0 8px}.meta{color:var(--ink3);font-size:12.5px}.empty{color:var(--ink3);padding:24px 0}
-.strip{display:flex;gap:14px;overflow-x:auto;padding:8px 2px 10px;margin:6px 0 4px}.strip a{display:flex;flex-direction:column;align-items:center;gap:5px;text-decoration:none;color:var(--ink2);font-size:11px;width:76px;flex:0 0 auto}.strip a:hover{color:var(--ink)}.strip .av{position:relative}.strip .mg{width:44px;height:44px;font-size:15px;box-shadow:0 0 0 2px var(--surface),0 0 0 4px var(--good)}.strip .dot{position:absolute;right:-1px;bottom:-1px}.strip span.t{max-width:76px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center}.strip small{color:var(--ink3);max-width:76px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.tiles{display:flex;flex-wrap:wrap;gap:10px;margin:8px 0 18px}.tile{display:flex;align-items:center;gap:9px;padding:9px 12px;border:1px solid var(--rule);border-radius:10px;background:var(--surface);color:var(--ink);text-decoration:none;min-width:170px;transition:transform .12s,box-shadow .12s;cursor:pointer}.tile:hover{transform:translateY(-1px);box-shadow:0 4px 14px rgba(0,0,0,.08)}.tile.over{border-color:var(--acc);background:var(--accSoft)}.tile.nodrop{opacity:.35}.tile .fi{color:var(--acc);font-size:18px}.tile .n{margin-left:auto;font-size:11px;color:var(--ink3);font-variant-numeric:tabular-nums}.tile .acts{display:none;gap:4px;margin-left:6px}.tile:hover .acts{display:flex}.tile .acts button{background:none;border:0;color:var(--ink3);cursor:pointer;padding:0 3px;font-size:12px}.tile .acts button:hover{color:var(--acc)}
-.filters{display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:12px;margin:6px 0 10px}.filters>span{color:var(--ink3);margin-right:2px}.chip{padding:2px 9px;border:1px solid var(--rule);border-radius:999px;background:var(--surface);color:var(--ink2);text-decoration:none}.chip:hover{border-color:var(--ink3)}.chip.on{background:var(--acc);color:var(--accInk);border-color:var(--acc)}
-.grp{margin:18px 0 4px;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--acc);font-weight:700;display:flex;align-items:center;gap:8px}.grp span{color:var(--ink3);font-weight:500;letter-spacing:0;text-transform:none}
-.tw{overflow-x:auto}table{width:100%;border-collapse:separate;border-spacing:0;background:var(--surface);border:1px solid var(--rule);border-radius:10px;table-layout:fixed}th{position:relative;text-align:left;font-size:11px;color:var(--ink3);font-weight:600;padding:8px 12px;border-bottom:1px solid var(--rule);text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;overflow:hidden}th .rz{position:absolute;top:0;right:-3px;width:7px;height:100%;cursor:col-resize;user-select:none}th .rz:hover,th .rz.on{background:var(--acc);opacity:.5}td{padding:9px 12px;border-bottom:1px solid var(--rule);vertical-align:top;font-size:13px;overflow:hidden}tr:last-child td{border-bottom:none}tbody tr{transition:background .12s,box-shadow .12s}tbody tr:hover{background:var(--hover)}tbody tr.drag{opacity:.5}tbody tr[draggable]{cursor:grab}tr.retired td{opacity:.6}tr.hit td{box-shadow:inset 3px 0 var(--acc)}
-td.name{font-weight:600}td.name .t{display:flex;align-items:center;gap:9px}td.name .t a{color:var(--ink);text-decoration:none}td.name .t a:hover{text-decoration:underline}td.name small{display:block;font-weight:400;color:var(--ink3);font-family:ui-monospace,Menlo,monospace;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:3px}
-.hc{position:relative}.hc .card{display:none;position:absolute;left:0;top:calc(100% + 6px);z-index:4;width:380px;max-width:70vw;background:var(--surface);border:1px solid var(--rule);border-radius:10px;padding:10px 12px;box-shadow:0 8px 28px rgba(0,0,0,.14);font-weight:400;font-size:12.5px;color:var(--ink2);white-space:normal;line-height:1.45}.hc:hover .card,.hc:focus-within .card{display:block}.card p{margin:0 0 6px}.card .k{color:var(--ink3);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-right:4px}
-.mg{display:inline-flex;align-items:center;justify-content:center;border-radius:50%;font-weight:700;letter-spacing:.02em;flex:0 0 auto;object-fit:cover}.mg-img{background:transparent}
-${MONO_CSS}
-.st{display:inline-block;font-size:11px;padding:1px 7px;border-radius:999px;font-weight:600;white-space:nowrap}.st.open{background:var(--accSoft);color:var(--acc)}.st.ended{background:var(--tint);color:var(--ink3)}.st.feedback{background:var(--warnSoft);color:var(--warn)}.st.orphan{background:var(--badSoft);color:var(--bad)}.st.stale{background:var(--warnSoft);color:var(--warn)}
-.plan{display:inline-block;font-size:11px;padding:1px 8px;border-radius:4px;font-weight:600;white-space:nowrap;border:1px solid transparent}.plan.not-started{background:var(--tint);color:var(--ink3)}.plan.in-review{background:var(--accSoft);color:var(--acc)}.plan.approved{background:var(--goodSoft);color:var(--good)}.plan.in-progress{background:var(--warnSoft);color:var(--warn)}.plan.merged{background:var(--good);color:var(--goodInk)}.plan.implemented{background:var(--good);color:var(--goodInk)}.plan.retired{background:var(--tint);color:var(--ink3)}.plan.superseded{background:var(--tint);color:var(--ink3);text-decoration:line-through}.plan.inferred{background:transparent;border-style:dashed;border-color:currentColor}
-.prio{display:inline-block;font-size:10.5px;padding:0 6px;border-radius:999px;font-weight:600;white-space:nowrap;border:1px solid var(--rule);color:var(--ink3)}.prio.high{border-color:var(--bad);color:var(--bad)}.prio.low{opacity:.7}
-select.inline{font:inherit;font-size:12px;padding:2px 4px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--ink2);cursor:pointer;max-width:150px}select.inline:hover{border-color:var(--rule);background:var(--surface)}
-.pr{display:inline-block;font-size:11.5px;font-family:ui-monospace,Menlo,monospace;padding:0 6px;border-radius:4px;border:1px solid var(--rule);margin:0 4px 3px 0;text-decoration:none;color:var(--acc);white-space:nowrap;background:var(--surface)}.pr.MERGED{border-color:var(--good);color:var(--good)}.pr.OPEN{border-color:var(--warn);color:var(--warn)}.pr.CLOSED{border-color:var(--bad);color:var(--bad);text-decoration:line-through}.pr.inferred{border-style:dashed}
+*{box-sizing:border-box;min-width:0}html{color-scheme:light dark}body{margin:0;background:var(--paper);color:var(--ink);font:14px/1.45 "Schibsted Grotesk",system-ui,sans-serif}
+a{color:var(--acc)}button{font:inherit}.mono{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:12px;word-break:break-all}
+.top{display:flex;align-items:center;gap:14px;padding:0 18px;height:48px;background:var(--bar);color:var(--barInk);border-bottom:1px solid var(--rule);position:sticky;top:0;z-index:6}.top a{color:inherit;text-decoration:none}.logo{font-weight:700;font-size:17px;letter-spacing:-.01em}.crumb{font-size:12.5px;color:var(--barMute);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sp{flex:1}
+.pill{font-size:11.5px;padding:2px 9px;border-radius:999px;background:var(--tint);color:var(--ink2);white-space:nowrap}.top .lv-pill{display:inline-flex;align-items:center;gap:6px;background:transparent;color:var(--barMute);padding:0}.ld{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--good)}.lv-pill.off .ld{background:var(--bad)}
+.search{flex:0 1 300px;display:flex;align-items:center;gap:6px;background:var(--tint);border-radius:8px;padding:5px 10px;color:var(--ink3)}.search input{flex:1;background:transparent;border:0;color:var(--ink);font:inherit;font-size:13px;outline:0}.search input::placeholder{color:var(--ink3)}
+.tbtn{background:transparent;border:1px solid var(--rule);color:var(--barInk);border-radius:8px;padding:3px 9px;cursor:pointer;font-size:13px;line-height:1.4}.tbtn:hover{background:var(--tint)}#sideShow{display:none}html.nos #sideShow{display:inline-block}
+.shell{display:grid;grid-template-columns:var(--sidew,220px) minmax(0,1fr);min-height:calc(100vh - 48px)}html.nos .shell{grid-template-columns:minmax(0,1fr)}html.nos .side{display:none}@media(max-width:900px){.shell{grid-template-columns:minmax(0,1fr)}.side{display:none}}
+.side{position:sticky;top:48px;align-self:start;max-height:calc(100vh - 48px);overflow:auto;border-right:1px solid var(--rule);padding:8px 8px 40px;background:var(--surface)}.side .rzs{position:absolute;top:0;right:0;width:6px;height:100%;cursor:col-resize;z-index:2}.side .rzs:hover,.side .rzs.on{background:var(--acc);opacity:.4}
+.shead{display:flex;align-items:center;gap:2px;padding:0 4px 6px}.shead button{background:none;border:0;color:var(--ink3);cursor:pointer;padding:4px 7px;border-radius:6px;font-size:14px;line-height:1;display:inline-flex;align-items:center}.shead button svg{width:15px;height:15px}.shead button:hover{background:var(--hover);color:var(--ink)}.shead .sp{flex:1}
+.side h4{margin:14px 10px 4px;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink3);font-weight:600}
+.nav{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:8px;color:var(--ink2);text-decoration:none;font-size:13px;cursor:pointer;border:1px dashed transparent;list-style:none;min-width:0}.nav::-webkit-details-marker{display:none}.nav:hover{background:var(--hover)}.nav.on{background:var(--accSoft);color:var(--acc);font-weight:600}.nav .n{margin-left:auto;font-size:11px;color:var(--ink3);font-variant-numeric:tabular-nums;flex:0 0 auto}.nav.on .n{color:var(--acc)}.nav svg{width:16px;height:16px;flex:0 0 auto;color:var(--ink3)}.nav.on svg{color:var(--acc)}.nav .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nav.over{border-color:var(--acc);background:var(--accSoft)}.nav.nodrop{opacity:.35}
+.proj>summary .fo{display:none}.proj[open]>summary .fo{display:block}.proj[open]>summary .fc{display:none}.proj[draggable] summary{cursor:pointer}
+.navwrap{position:relative}.nav.plan{padding:4px 10px 4px 34px;font-size:12.5px;color:var(--ink2);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.nav.plan.on{font-weight:600}.hid{display:none!important}
+button.more{background:none;border:0;color:var(--acc);font-size:12.5px;padding:8px 12px;cursor:pointer;text-align:left}button.more:hover{text-decoration:underline}.side button.more{padding:3px 10px 3px 34px;font-size:12px}
+.newf{display:flex;gap:6px;margin:6px 10px 0}.newf input{flex:1;font:inherit;font-size:12.5px;padding:4px 7px;border:1px solid var(--rule);border-radius:7px;background:var(--paper);color:var(--ink)}.newf button{font-size:12px;padding:4px 9px;border:1px solid var(--rule);border-radius:7px;background:var(--surface);color:var(--ink2);cursor:pointer}
+main{padding:16px 22px 80px;min-width:0}
+.crumbs{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink3);margin:0 0 6px}.crumbs a{color:var(--ink2);text-decoration:none}.crumbs a:hover{text-decoration:underline}.crumbs b{color:var(--ink)}
+h1{font-weight:600;font-size:22px;letter-spacing:-.01em;margin:0 0 4px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}h2{font-weight:600;font-size:16px;margin:28px 0 8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}h2 .meta{font-weight:400}.meta{color:var(--ink3);font-size:12.5px}.empty{color:var(--ink3);padding:24px 0}
+.fbar{display:flex;gap:6px;align-items:center;margin:10px 0 12px;flex-wrap:wrap;position:relative;z-index:3}.fbtn{position:relative}.fbtn>summary{list-style:none;display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border:1px solid var(--rule);border-radius:999px;background:var(--surface);color:var(--ink2);font-size:12.5px;cursor:pointer;white-space:nowrap}.fbtn>summary::-webkit-details-marker{display:none}.fbtn>summary:hover{background:var(--hover)}.fbtn.on>summary{border-color:var(--acc);color:var(--acc);background:var(--accSoft)}.fbtn[open]>summary{border-color:var(--ink3)}.fbtn .ch{font-size:10px;opacity:.8}
+.pop{position:absolute;left:0;top:calc(100% + 6px);min-width:220px;max-width:340px;background:var(--surface);border:1px solid var(--rule);border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.14);padding:8px;display:flex;flex-direction:column;gap:2px;z-index:7}.pop.right{left:auto;right:0}.pop a{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 9px;border-radius:7px;color:var(--ink2);text-decoration:none;font-size:13px}.pop a:hover{background:var(--hover)}.pop a.on{background:var(--accSoft);color:var(--acc);font-weight:600}.pop .n{font-size:11px;color:var(--ink3);font-variant-numeric:tabular-nums}.pop .h{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink3);padding:4px 9px 2px}
+.pop label{display:flex;align-items:center;gap:8px;padding:5px 9px;font-size:13px;color:var(--ink2);cursor:pointer;border-radius:7px}.pop label:hover{background:var(--hover)}.pop label.fixed{opacity:.55;cursor:default}
+.grp{margin:22px 0 6px;font-size:13px;color:var(--ink);font-weight:600;display:flex;align-items:center;gap:8px}.grp a{color:inherit;text-decoration:none}.grp a:hover{text-decoration:underline}.grp span{color:var(--ink3);font-weight:400;font-size:12px}
+.tw{overflow-x:auto}table{width:100%;border-collapse:separate;border-spacing:0;background:var(--surface);border:1px solid var(--rule);border-radius:10px;table-layout:fixed}th{position:relative;text-align:left;font-size:11px;color:var(--ink3);font-weight:600;padding:8px 12px;border-bottom:1px solid var(--rule);text-transform:uppercase;letter-spacing:.05em;white-space:nowrap;overflow:hidden;user-select:none}th .rz{position:absolute;top:0;right:-3px;width:7px;height:100%;cursor:col-resize;user-select:none}th .rz:hover,th .rz.on{background:var(--acc);opacity:.5}th .sa{margin-left:4px;color:var(--acc)}
+td{padding:0 12px;height:44px;border-bottom:1px solid var(--rule);vertical-align:middle;font-size:13px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}tr:last-child td{border-bottom:none}tbody tr:hover{background:var(--hover)}tbody tr.drag{opacity:.5}tr.retired td{opacity:.6}tr.hit td{box-shadow:inset 3px 0 var(--acc)}tbody tr:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+.off{display:none}
+td.name{font-weight:600}td.name .t{display:flex;align-items:center;gap:8px;min-width:0}td.name .t a{color:var(--ink);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}td.name .t a:hover{text-decoration:underline}.vn{font-size:11px;color:var(--ink3);font-weight:500;font-family:"IBM Plex Mono",ui-monospace,monospace;flex:0 0 auto}
+.hc{position:relative;min-width:0}.card{display:none;z-index:8;width:400px;max-width:70vw;background:var(--surface);border:1px solid var(--rule);border-radius:10px;padding:10px 12px;box-shadow:0 8px 28px rgba(0,0,0,.14);font-weight:400;font-size:12.5px;color:var(--ink2);white-space:normal;line-height:1.45;text-align:left;font-family:"Schibsted Grotesk",system-ui,sans-serif}.hc .card{position:absolute;left:0;top:calc(100% + 6px)}.hc:hover .card,.hc:focus-within .card{display:block}.card.portal{display:block;position:fixed}.card p{margin:0 0 6px}.card .k{color:var(--ink3);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-right:4px}
+.dw{display:inline-flex;align-items:center;gap:7px;white-space:nowrap;max-width:100%}.dw i{width:8px;height:8px;border-radius:50%;background:var(--ink3);flex:0 0 auto}.dw.acc i{background:var(--acc)}.dw.good i{background:var(--good)}.dw.warn i{background:var(--warn)}.dw.bad i{background:var(--bad)}.dw.viol i{background:var(--viol)}.dw.inferred i{background:transparent;border:1.5px dashed currentColor}.dw.mute{color:var(--ink3)}
+.sw{position:relative;display:block}.sw select.inline{position:absolute;left:-6px;top:50%;transform:translateY(-50%);opacity:0;width:calc(100% + 12px);max-width:none}.sw:hover select.inline,.sw select.inline:focus{opacity:1;background:var(--surface);border-color:var(--rule);color:var(--ink)}
+select.inline{font:inherit;font-size:12.5px;padding:2px 4px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--ink2);cursor:pointer;max-width:150px}
+.prio{display:inline-block;font-size:10.5px;padding:0 6px;border-radius:999px;font-weight:600;white-space:nowrap;border:1px solid var(--rule);color:var(--ink3);flex:0 0 auto}.prio.high{border-color:var(--bad);color:var(--bad)}.prio.low{opacity:.7}
+.pr{display:inline-block;font-size:11.5px;font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;padding:0 6px;border-radius:4px;border:1px solid var(--rule);margin:0 4px 3px 0;text-decoration:none;color:var(--acc);white-space:nowrap;background:var(--surface)}.pr.MERGED{border-color:var(--good);color:var(--good)}.pr.OPEN{border-color:var(--warn);color:var(--warn)}.pr.CLOSED{border-color:var(--bad);color:var(--bad);text-decoration:line-through}.pr.inferred{border-style:dashed}
 .num{font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--ink2)}
-.a,button.a{color:var(--acc);text-decoration:underline;text-underline-offset:2px;cursor:pointer;margin-right:8px;white-space:nowrap;background:none;border:0;font:inherit;padding:0}form.inline{display:inline}
-.ag{display:flex;align-items:center;gap:6px;white-space:nowrap;font-size:12.5px}.ag .pv{color:var(--ink3);font-size:11px}.ag.active{color:var(--good);font-weight:600}.ag.ended{color:var(--ink2)}.ag.none{color:var(--ink3)}.ag .name{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;font-weight:500}.ag.guessed .name{border-bottom:1px dotted currentColor}.ag.scan .name{border:1px dotted currentColor;border-radius:4px;padding:0 3px}
-.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--good);box-shadow:0 0 0 0 var(--good);animation:pulse 1.8s infinite}@keyframes pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--good) 60%,transparent)}70%{box-shadow:0 0 0 7px transparent}100%{box-shadow:0 0 0 0 transparent}}
-.lv{display:block;font-size:11px;color:var(--ink3);margin-top:3px}
-.detail{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:20px}@media(max-width:900px){.detail{grid-template-columns:minmax(0,1fr)}}
-.msg{margin:0 0 10px;padding:8px 11px;border-radius:8px;background:var(--tint);max-width:70ch;white-space:pre-wrap}.msg.agent{background:var(--accSoft)}.msg.ann{background:var(--warnSoft)}.msg.sys{background:var(--tint);color:var(--ink2)}.msg small{display:block;font-size:10.5px;color:var(--ink3);margin-bottom:2px;white-space:normal}
-.tg{border:1px solid var(--rule);border-radius:10px;background:var(--surface);margin:0 0 12px}.tg summary{display:flex;align-items:center;gap:8px;padding:9px 12px;cursor:pointer;list-style:none;font-size:13px}.tg summary::-webkit-details-marker{display:none}.tg summary .who{font-weight:600;font-family:ui-monospace,Menlo,monospace;font-size:12px}.tg summary .when{color:var(--ink3);font-size:12px;margin-left:auto;white-space:nowrap}.tg .body{padding:6px 12px 10px;border-top:1px solid var(--rule)}
-.side2{background:var(--surface);border:1px solid var(--rule);border-radius:10px;padding:14px;font-size:13px;position:sticky;top:56px}.side2 p{margin:0 0 10px}.mono{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;word-break:break-all}
-.side2 select,.side2 input[type=text],.side2 input[type=number],.xform input,.xform select,.xform textarea{font:inherit;font-size:12.5px;padding:3px 6px;border:1px solid var(--rule);border-radius:6px;background:var(--paper);color:var(--ink)}button.b{font:inherit;font-size:12px;padding:3px 9px;border:1px solid var(--acc);border-radius:6px;background:var(--acc);color:var(--accInk);cursor:pointer}button.b.q{background:var(--surface);color:var(--acc)}button.b:disabled{opacity:.5;cursor:default}
+.a,button.a{color:var(--acc);text-decoration:none;text-underline-offset:2px;cursor:pointer;margin-right:10px;white-space:nowrap;background:none;border:0;font:inherit;font-size:13px;padding:0}.a:hover{text-decoration:underline}form.inline{display:inline}
+td.acts{overflow:visible}button.dots{background:none;border:0;cursor:pointer;color:var(--ink2);padding:0 6px;border-radius:6px;font-weight:700;letter-spacing:.08em;font-size:14px;line-height:1.2}button.dots:hover{background:var(--tint)}.menu.src{display:none}
+.menu{min-width:230px;background:var(--surface);border:1px solid var(--rule);border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.16);padding:6px;font-weight:400;text-align:left;white-space:nowrap;font-size:13px}.menu a,.menu button,.menu summary{display:flex;width:100%;align-items:center;justify-content:space-between;gap:12px;padding:6px 10px;border-radius:7px;color:var(--ink);background:none;border:0;font:inherit;font-size:13px;text-decoration:none;cursor:pointer;text-align:left;margin:0;list-style:none}.menu a:hover,.menu button:hover,.menu summary:hover{background:var(--hover)}.menu summary::-webkit-details-marker{display:none}.menu hr{border:0;border-top:1px solid var(--rule);margin:5px 4px}.menu .danger{color:var(--bad)}.menu form{display:block}.menu details{position:relative}.menu details .sub{position:absolute;left:100%;top:-6px;margin-left:2px;min-width:180px;max-height:300px;overflow:auto;background:var(--surface);border:1px solid var(--rule);border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.16);padding:6px;z-index:1}.menu .sub button.on::after{content:"\\2713";color:var(--acc)}.menu .k{color:var(--ink3);font-size:11px}
+.cmenu{position:fixed;z-index:20}
+.ag{display:flex;align-items:center;gap:6px;white-space:nowrap;font-size:13px;min-width:0}.ag .pv{color:var(--ink3);font-size:11px;flex:0 0 auto}.ag.active{color:var(--ink);font-weight:600}.ag.ended{color:var(--ink2)}.ag.none{color:var(--ink3)}.ag .name{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis}.ag.guessed .name{border-bottom:1px dotted currentColor}.ag.scan .name{border:1px dotted currentColor;border-radius:4px;padding:0 3px}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--good);box-shadow:0 0 0 0 var(--good);animation:pulse 1.8s infinite;flex:0 0 auto}@keyframes pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--good) 60%,transparent)}70%{box-shadow:0 0 0 7px transparent}100%{box-shadow:0 0 0 0 transparent}}
+.lv{display:block;font-size:11.5px;color:var(--ink3);margin-top:1px;line-height:1.3;overflow:hidden;text-overflow:ellipsis;font-weight:400}
+.st{display:inline-block;font-size:11px;padding:1px 7px;border-radius:999px;font-weight:600;white-space:nowrap}.st.open{background:var(--accSoft);color:var(--acc)}.st.ended{background:var(--tint);color:var(--ink3)}.st.orphan{background:var(--badSoft);color:var(--bad)}.st.stale{background:var(--warnSoft);color:var(--warn)}
+.tags .tg1{display:inline-block;font-size:11px;padding:1px 8px;border-radius:999px;background:var(--tint);color:var(--ink2);margin-right:4px;text-decoration:none}.tags .tg1:hover{background:var(--accSoft);color:var(--acc)}
+.stageline{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:10px 0 18px;font-size:12.5px;color:var(--ink3)}.stage-steps{display:flex;gap:4px;margin:0}.stage-steps span{padding:4px 12px;border-radius:999px;background:var(--tint);color:var(--ink3);font-size:12px;white-space:nowrap}.stage-steps span.past{background:var(--accSoft);color:var(--acc)}.stage-steps span.now{background:var(--acc);color:var(--accInk);font-weight:600}.stage-steps span.now.inferred{outline:2px dashed var(--acc);outline-offset:-2px;background:var(--surface);color:var(--acc)}
+.twoCol{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start}@media(max-width:1000px){.twoCol{grid-template-columns:minmax(0,1fr)}}
+.box{background:var(--surface);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;font-size:13px;min-width:0}.box h3{margin:0 0 10px;font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:8px;flex-wrap:wrap}.box h3 .meta{font-weight:400}
+.kv{display:grid;grid-template-columns:96px minmax(0,1fr);gap:6px 10px;font-size:13px;margin:6px 0 10px}.kv .k{color:var(--ink3)}.kv>span{min-width:0;overflow-wrap:anywhere}
+.xform{display:grid;gap:8px;font-size:13px}.xform .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}.xform label{display:inline-flex;align-items:center;gap:6px}.xform input,.xform select,.xform textarea,.box select,.box input[type=text],.box input[type=number]{font:inherit;font-size:12.5px;padding:4px 7px;border:1px solid var(--rule);border-radius:7px;background:var(--paper);color:var(--ink)}.xform textarea{width:100%;min-height:64px;resize:vertical}.xform+.xform{margin-top:14px;padding-top:14px;border-top:1px solid var(--rule)}
+button.b{font:inherit;font-size:12.5px;padding:5px 11px;border:1px solid var(--acc);border-radius:7px;background:var(--acc);color:var(--accInk);cursor:pointer}button.b.q{background:var(--surface);color:var(--acc)}button.b:disabled{opacity:.5;cursor:default}
 .notice{background:var(--goodSoft);border:1px solid var(--good);color:var(--good);padding:8px 12px;border-radius:8px;margin:12px 0;font-size:13px}.notice.warn{background:var(--warnSoft);border-color:var(--warn);color:var(--warn)}.notice.bad{background:var(--badSoft);border-color:var(--bad);color:var(--bad)}
-.note{border-left:3px solid var(--rule);background:var(--surface);border-radius:0 8px 8px 0;padding:8px 11px;margin:0 0 8px;font-size:13px}.note .anc{color:var(--ink3);font-size:12px;font-style:italic}.note.sent{border-left-color:var(--good)}.note.resolved{opacity:.6}
-.diff{font:12.5px/1.5 ui-monospace,Menlo,monospace;background:var(--surface);border:1px solid var(--rule);border-radius:8px;overflow:hidden}.diff div{padding:1px 12px;white-space:pre-wrap;word-break:break-word}.diff .add{background:var(--goodSoft);color:var(--good)}.diff .del{background:var(--badSoft);color:var(--bad);text-decoration:line-through}.diff details{border-top:1px solid var(--rule);border-bottom:1px solid var(--rule)}.diff summary{padding:3px 12px;color:var(--ink3);cursor:pointer;background:var(--paper);font-size:12px}
+.msg{margin:0 0 10px;padding:8px 11px;border-radius:8px;background:var(--tint);max-width:72ch;white-space:pre-wrap}.msg.agent{background:var(--accSoft)}.msg.ann{background:var(--warnSoft)}.msg.sys{background:var(--tint);color:var(--ink2)}.msg.priv{background:var(--surface);border:1px dashed var(--rule)}.msg small{display:block;font-size:10.5px;color:var(--ink3);margin-bottom:2px;white-space:normal}
+.tg{border:1px solid var(--rule);border-radius:10px;background:var(--surface);margin:0 0 12px}.tg summary{display:flex;align-items:center;gap:8px;padding:9px 12px;cursor:pointer;list-style:none;font-size:13px}.tg summary::-webkit-details-marker{display:none}.tg summary .who{font-weight:600;font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:12px}.tg summary .when{color:var(--ink3);font-size:12px;margin-left:auto;white-space:nowrap}.tg .body{padding:6px 12px 10px;border-top:1px solid var(--rule)}
+.note{border-left:3px solid var(--rule);background:var(--surface);border-radius:0 8px 8px 0;padding:8px 11px;margin:0 0 8px;font-size:13px;white-space:normal}.note .anc{color:var(--ink3);font-size:12px;font-style:italic}.note.sent{border-left-color:var(--good)}.note.resolved{opacity:.6}.note .reply{margin-top:5px;padding:4px 8px;background:var(--tint);border-radius:6px;color:var(--ink2);font-size:12.5px}
+.diff{font:12.5px/1.5 "IBM Plex Mono",ui-monospace,Menlo,monospace;background:var(--surface);border:1px solid var(--rule);border-radius:8px;overflow:hidden}.diff div{padding:1px 12px;white-space:pre-wrap;word-break:break-word}.diff .add{background:var(--goodSoft);color:var(--good)}.diff .del{background:var(--badSoft);color:var(--bad);text-decoration:line-through}.diff details{border-top:1px solid var(--rule);border-bottom:1px solid var(--rule)}.diff summary{padding:3px 12px;color:var(--ink3);cursor:pointer;background:var(--paper);font-size:12px}
 .legend{font-size:12px;color:var(--ink2);margin:6px 0 12px}.legend b{font-weight:600}
-.stg{display:inline-block;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;font-weight:700;padding:1px 7px;border-radius:999px;margin-bottom:4px}.stg.planning{background:var(--accSoft);color:var(--acc)}.stg.developing{background:var(--warnSoft);color:var(--warn)}.stg.review{background:var(--violSoft);color:var(--viol)}.stg.done{background:var(--goodSoft);color:var(--good)}.stg.parked{background:var(--tint);color:var(--ink3)}.stg.inferred{background:transparent;border:1px dashed currentColor}
-.prog{display:block;color:var(--ink3);font-size:12px;margin-top:4px}.prog b{color:var(--ink2);font-weight:500}
-.stage-steps{display:flex;gap:6px;margin:8px 0 10px;max-width:640px}.stage-steps span{flex:1;text-align:center;padding:7px 4px;border-radius:6px;background:var(--tint);color:var(--ink3);font-size:12.5px}.stage-steps span.past{background:var(--accSoft);color:var(--acc)}.stage-steps span.now{background:var(--acc);color:var(--accInk);font-weight:600}.stage-steps span.now.inferred{outline:2px dashed var(--acc);outline-offset:-2px;background:var(--surface);color:var(--acc)}
-.tl td.num{color:var(--ink3)}.tl .sess{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:var(--ink2)}
-.xform{background:var(--surface);border:1px solid var(--rule);border-radius:10px;padding:12px 14px;font-size:13px;display:grid;gap:8px;max-width:680px}.xform label{margin-right:12px}.xform .row{display:flex;gap:14px;flex-wrap:wrap;align-items:center}.xform textarea{width:100%;min-height:74px;resize:vertical}
+.tl td{height:auto;padding:8px 12px;white-space:normal;vertical-align:top}.tl td.sess .ag{display:inline-flex;max-width:100%}.tl td.num{color:var(--ink3)}.tl .sess{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:11.5px;color:var(--ink2)}
+.vt table{min-width:760px}.vt td{white-space:normal;height:auto;padding:8px 12px}
 .thumbs{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}.thumbs img{width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--rule);display:block}
 .vcomments summary{cursor:pointer;color:var(--acc);font-size:12.5px;white-space:nowrap}.vcomments .note{margin:6px 0 0;max-width:520px;font-size:12.5px}.vcomments .note .anc{font-size:11.5px}
-.note .reply{margin-top:5px;padding:4px 8px;background:var(--tint);border-radius:6px;color:var(--ink2);font-size:12.5px}
-pre.pane{background:var(--bar);color:var(--barInk);padding:10px 12px;border-radius:8px;font:12px/1.4 ui-monospace,Menlo,monospace;overflow-x:auto;max-width:900px;white-space:pre-wrap}
-.kv{display:grid;grid-template-columns:110px minmax(0,1fr);gap:4px 10px;font-size:13px;margin:8px 0}.kv .k{color:var(--ink3)}
+pre.pane{background:#1a1d21;color:#e8e6e1;padding:10px 12px;border-radius:8px;font:12px/1.4 "IBM Plex Mono",ui-monospace,Menlo,monospace;overflow-x:auto;max-width:900px;white-space:pre-wrap}
+details.fold{margin:8px 0}details.fold>summary{cursor:pointer;color:var(--acc);font-size:13px;list-style:none}details.fold>summary::-webkit-details-marker{display:none}details.fold>summary::before{content:"\\203A";display:inline-block;margin-right:6px;transition:transform .12s}details.fold[open]>summary::before{transform:rotate(90deg)}details.fold .in{margin:8px 0 0}
 .errpage{max-width:640px;margin:60px auto;padding:0 20px}.errpage h1{font-size:22px}.errpage p{font-size:15px}
 `;
 const CLIENT_JS = `
 (function(){
-  var KEY="lavish-home:theme",W="lavish-home:cols";
+  var KEY="lavish-home:theme",W="lavish-home:cols",COLK="lavish-home:columns",SORTK="lavish-home:sort",SIDEW="lavish-home:side",SIDEH="lavish-home:side-hidden",PROJK="lavish-home:proj";
+  function ls(k,d){try{var v=localStorage.getItem(k);return v===null?d:JSON.parse(v);}catch(e){return d;}}function lsSet(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
   function apply(t){if(t)document.documentElement.setAttribute("data-theme",t);else document.documentElement.removeAttribute("data-theme");}
   try{apply(localStorage.getItem(KEY)||"");}catch(e){}
   var tb=document.getElementById("themeToggle");
   if(tb)tb.addEventListener("click",function(){var cur=document.documentElement.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");var next=cur==="dark"?"light":"dark";apply(next);try{localStorage.setItem(KEY,next);}catch(e){}});
-  /* search: filter rows by title / path / folder */
+  var isHome=document.body.dataset.view==="all";
+  /* show more: on the home view each project shows 5 rows; the button reveals 10 more (rows keep their sorted order) */
+  var shown={};
+  function applyMore(t){if(!isHome||!t.dataset.grp)return;var n=shown[t.dataset.grp]||5;var rows=[].slice.call(t.querySelectorAll("tbody tr[data-key]"));rows.forEach(function(r,i){r.classList.toggle("hid",i>=n);});var b=t.parentNode.nextElementSibling;if(b&&b.matches("button.more")){var left=rows.length-n;b.classList.toggle("hid",left<=0);b.textContent="Show "+Math.min(10,left)+" more";}}
+  document.querySelectorAll("button.more[data-grp]").forEach(function(b){b.addEventListener("click",function(){var t=document.querySelector('table[data-grp="'+b.dataset.grp+'"]');if(!t)return;shown[b.dataset.grp]=(shown[b.dataset.grp]||5)+10;applyMore(t);});});
+  /* search: filter rows by their text; a search shows every match regardless of Show more */
   var q=document.getElementById("q");
-  if(q)q.addEventListener("input",function(){var s=q.value.trim().toLowerCase();document.querySelectorAll("tbody tr[data-key]").forEach(function(tr){tr.style.display=!s||tr.textContent.toLowerCase().indexOf(s)!==-1?"":"none";});document.querySelectorAll("table").forEach(function(t){var any=[].some.call(t.querySelectorAll("tbody tr[data-key]"),function(r){return r.style.display!=="none"});var g=t.previousElementSibling;if(g&&g.classList.contains("grp"))g.style.display=any?"":"none";t.style.display=any?"":"none";});});
-  /* column resize: widths per column name in localStorage */
-  var saved={};try{saved=JSON.parse(localStorage.getItem(W)||"{}")||{};}catch(e){}
-  document.querySelectorAll("table[data-cols]").forEach(function(t){var cols=t.querySelectorAll("col[data-col]");cols.forEach(function(c){if(saved[c.dataset.col])c.style.width=saved[c.dataset.col]+"px";});
-    t.querySelectorAll("th .rz").forEach(function(h){h.addEventListener("mousedown",function(e){e.preventDefault();var th=h.parentNode,name=th.dataset.col,col=t.querySelector('col[data-col="'+name+'"]'),x0=e.clientX,w0=th.getBoundingClientRect().width;h.classList.add("on");
+  if(q)q.addEventListener("input",function(){var s=q.value.trim().toLowerCase();document.querySelectorAll("tbody tr[data-key]").forEach(function(tr){tr.style.display=!s||tr.textContent.toLowerCase().indexOf(s)!==-1?"":"none";if(s)tr.classList.remove("hid");});document.querySelectorAll("table[data-cols]").forEach(function(t){if(!s)applyMore(t);var any=[].some.call(t.querySelectorAll("tbody tr[data-key]"),function(r){return r.style.display!=="none"&&!r.classList.contains("hid")});var g=t.parentNode.previousElementSibling;if(g&&g.classList.contains("grp"))g.style.display=any?"":"none";t.parentNode.style.display=any?"":"none";var b=t.parentNode.nextElementSibling;if(b&&b.matches("button.more"))b.style.display=s?"none":"";});});
+  /* columns: which are shown (localStorage) + widths per column (localStorage) */
+  var COLS=window.__COLS||[],colPref=ls(COLK,{})||{},saved=ls(W,{})||{};
+  function colOn(c){return colPref[c.k]!==undefined?!!colPref[c.k]:!!c.on;}
+  function applyCols(){document.querySelectorAll("table[data-cols]").forEach(function(t){COLS.forEach(function(c){var on=colOn(c);t.querySelectorAll('[data-col="'+c.k+'"]').forEach(function(el){if(el.tagName==="COL"){el.style.width=on?(saved[c.k]?saved[c.k]+"px":el.dataset.w||""):"0";}else el.classList.toggle("off",!on);});});});document.querySelectorAll("#colsPop input").forEach(function(i){var c=COLS.filter(function(x){return x.k===i.value})[0];if(c)i.checked=colOn(c);});}
+  applyCols();
+  document.querySelectorAll("#colsPop input").forEach(function(i){i.addEventListener("change",function(){colPref[i.value]=i.checked;lsSet(COLK,colPref);applyCols();});});
+  document.querySelectorAll("table[data-cols]").forEach(function(t){
+    t.querySelectorAll("th .rz").forEach(function(h){h.addEventListener("mousedown",function(e){e.preventDefault();e.stopPropagation();var th=h.parentNode,name=th.dataset.col,col=t.querySelector('col[data-col="'+name+'"]'),x0=e.clientX,w0=th.getBoundingClientRect().width;h.classList.add("on");
       function mv(ev){var w=Math.max(70,w0+ev.clientX-x0);if(col)col.style.width=w+"px";saved[name]=Math.round(w);}
-      function up(){document.removeEventListener("mousemove",mv);document.removeEventListener("mouseup",up);h.classList.remove("on");try{localStorage.setItem(W,JSON.stringify(saved));}catch(e){}}
+      function up(){document.removeEventListener("mousemove",mv);document.removeEventListener("mouseup",up);h.classList.remove("on");lsSet(W,saved);}
       document.addEventListener("mousemove",mv);document.addEventListener("mouseup",up);});});});
-  /* drag and drop: a plan row onto a folder, a folder onto a folder; PUT /api/layout; cycles greyed while dragging */
+  /* sort: double-click a header (asc, desc, then back to newest-first); remembered per browser; status columns sort by their stage order */
+  var SORT=ls(SORTK,{col:"",dir:""})||{col:"",dir:""};
+  var NUM=/^-?[0-9]+([.][0-9]+)?$/;
+  function sortTable(t){var tb=t.tBodies[0];if(!tb)return;var rows=[].slice.call(tb.querySelectorAll("tr[data-key]"));rows.sort(function(a,b){var d=(+a.dataset.i)-(+b.dataset.i);if(!SORT.col)return d;var x=a.getAttribute("data-s-"+SORT.col)||"",y=b.getAttribute("data-s-"+SORT.col)||"";var c=NUM.test(x)&&NUM.test(y)?parseFloat(x)-parseFloat(y):x.localeCompare(y);if(!c)return d;return SORT.dir==="desc"?-c:c;});rows.forEach(function(r){tb.appendChild(r);});t.querySelectorAll("th .sa").forEach(function(s){s.remove();});if(SORT.col){var th=t.querySelector('th[data-col="'+SORT.col+'"]');if(th)th.insertAdjacentHTML("beforeend",'<span class="sa" aria-hidden="true">'+(SORT.dir==="desc"?"\\u2193":"\\u2191")+'</span>');}applyMore(t);}
+  function sortAll(){document.querySelectorAll("table[data-cols]").forEach(sortTable);}
+  document.querySelectorAll("table[data-cols] th[data-col]").forEach(function(th){if(th.dataset.nosort!==undefined)return;th.title=(th.title?th.title+" · ":"")+"Double-click to sort";th.addEventListener("dblclick",function(e){if(e.target.classList.contains("rz"))return;var k=th.dataset.col;if(SORT.col!==k)SORT={col:k,dir:"asc"};else if(SORT.dir==="asc")SORT={col:k,dir:"desc"};else SORT={col:"",dir:""};lsSet(SORTK,SORT);sortAll();});});
+  sortAll();
+  /* hover card as a portal: on hover the card moves to <body> with fixed coordinates, so no table wrapper clips it */
+  var portal=null,portalHome=null,hideT=null;
+  function cancelHide(){if(hideT){clearTimeout(hideT);hideT=null;}}
+  function hideCard(){if(!portal)return;portal.classList.remove("portal");portal.style.left=portal.style.top=portal.style.width="";portalHome.parent.insertBefore(portal,portalHome.next);portal=null;portalHome=null;}
+  function scheduleHide(){cancelHide();hideT=setTimeout(hideCard,140);}
+  function showCard(hc){var card=hc.querySelector(".card");if(!card)return;if(portal===card)return;hideCard();var r=hc.getBoundingClientRect();portalHome={parent:card.parentNode,next:card.nextSibling};document.body.appendChild(card);card.classList.add("portal");var w=Math.min(400,Math.floor(innerWidth*0.7));card.style.width=w+"px";var inSide=!!hc.closest(".side");card.style.left=Math.max(8,Math.min(inSide?r.right+12:r.left,innerWidth-w-12))+"px";card.style.top=(inSide?r.top:r.bottom+6)+"px";var ch=card.getBoundingClientRect().height;if(parseFloat(card.style.top)+ch>innerHeight-8)card.style.top=Math.max(8,(inSide?r.bottom:r.top-6)-ch)+"px";portal=card;
+    if(!card.dataset.wired){card.dataset.wired="1";card.addEventListener("mouseenter",cancelHide);card.addEventListener("mouseleave",scheduleHide);}}
+  document.querySelectorAll(".hc").forEach(function(hc){hc.addEventListener("mouseenter",function(){cancelHide();showCard(hc);});hc.addEventListener("mouseleave",scheduleHide);hc.addEventListener("focusin",function(){cancelHide();showCard(hc);});hc.addEventListener("focusout",scheduleHide);});
+  addEventListener("scroll",hideCard,true);
+  /* context menu: right-click a row (or Shift+F10 / the ⋯ button) opens the row's menu at the pointer */
+  var cm=null;function closeCm(){if(cm){cm.remove();cm=null;}}
+  function openCm(tr,x,y){closeCm();var src=tr.querySelector(".menu.src");if(!src)return;cm=document.createElement("div");cm.className="cmenu";var m=src.cloneNode(true);m.classList.remove("src");cm.appendChild(m);document.body.appendChild(cm);var r=m.getBoundingClientRect();cm.style.left=Math.max(4,Math.min(x,innerWidth-r.width-8))+"px";cm.style.top=Math.max(4,Math.min(y,innerHeight-r.height-8))+"px";var f=m.querySelector("a,button");if(f)f.focus();}
+  document.querySelectorAll("tr[data-key]").forEach(function(tr){tr.addEventListener("contextmenu",function(e){if(e.target.closest("a,button,select,input,textarea"))return;e.preventDefault();openCm(tr,e.clientX,e.clientY);});
+    tr.addEventListener("keydown",function(e){if((e.key==="F10"&&e.shiftKey)||e.key==="ContextMenu"){e.preventDefault();var r=tr.getBoundingClientRect();openCm(tr,r.left+60,r.bottom-4);}});
+    var d=tr.querySelector("button.dots");if(d)d.addEventListener("click",function(e){e.stopPropagation();if(cm){closeCm();return;}var r=d.getBoundingClientRect();openCm(tr,r.right-230,r.bottom+4);});});
+  document.addEventListener("click",function(e){if(cm&&!cm.contains(e.target))closeCm();document.querySelectorAll("details.fbtn[open]").forEach(function(d){if(!d.contains(e.target))d.open=false;});});
+  document.addEventListener("keydown",function(e){if(e.key==="Escape"){closeCm();document.querySelectorAll("details.fbtn[open]").forEach(function(d){d.open=false;});hideCard();}});
+  /* sidebar: hide/show, resize, project collapse (remembered), Show more per project, ← → between plans */
+  var html=document.documentElement,side=document.querySelector(".side"),shell=document.querySelector(".shell");
+  var sw=ls(SIDEW,0);if(sw&&shell)shell.style.setProperty("--sidew",sw+"px");
+  function setHidden(h){html.classList.toggle("nos",h);lsSet(SIDEH,h?"1":"0");try{localStorage.setItem(SIDEH,h?"1":"0");}catch(e){}}
+  var hb=document.getElementById("sideHide");if(hb)hb.addEventListener("click",function(){setHidden(true);});
+  var sb=document.getElementById("sideShow");if(sb)sb.addEventListener("click",function(){setHidden(false);});
+  var rz=document.querySelector(".side .rzs");if(rz&&shell)rz.addEventListener("mousedown",function(e){e.preventDefault();var x0=e.clientX,w0=side.getBoundingClientRect().width;rz.classList.add("on");
+    function mv(ev){var w=Math.max(180,Math.min(420,w0+ev.clientX-x0));shell.style.setProperty("--sidew",w+"px");sw=Math.round(w);}
+    function up(){document.removeEventListener("mousemove",mv);document.removeEventListener("mouseup",up);rz.classList.remove("on");lsSet(SIDEW,sw);}
+    document.addEventListener("mousemove",mv);document.addEventListener("mouseup",up);});
+  var projPref=ls(PROJK,{})||{};
+  document.querySelectorAll("details.proj").forEach(function(d){var n=d.dataset.proj;if(projPref[n]===false)d.open=false;d.addEventListener("toggle",function(){projPref[n]=d.open;lsSet(PROJK,projPref);});
+    var plans=[].slice.call(d.querySelectorAll(".navwrap")),more=d.querySelector("button.more"),n5=5;function show(){plans.forEach(function(p,i){p.classList.toggle("hid",i>=n5);});if(more){more.classList.toggle("hid",plans.length<=n5);more.textContent="Show "+Math.min(10,plans.length-n5)+" more";}}
+    if(more)more.addEventListener("click",function(e){e.preventDefault();n5+=10;show();});show();});
+  function planLinks(){return [].slice.call(document.querySelectorAll(".side a.plan"));}
+  function step(dir){var links=planLinks();if(!links.length)return;var cur=document.body.dataset.key||"";var i=-1;links.forEach(function(a,j){if(a.dataset.key===cur)i=j;});var j=i<0?(dir>0?0:links.length-1):(i+dir+links.length)%links.length;location.href=links[j].getAttribute("href");}
+  var pb=document.getElementById("prevPlan"),nb=document.getElementById("nextPlan");if(pb)pb.addEventListener("click",function(){step(-1);});if(nb)nb.addEventListener("click",function(){step(1);});
+  document.addEventListener("keydown",function(e){if(e.metaKey||e.ctrlKey||e.altKey)return;var t=e.target;if(t&&(t.tagName==="INPUT"||t.tagName==="TEXTAREA"||t.tagName==="SELECT"||t.isContentEditable))return;if(e.key==="ArrowLeft")step(-1);else if(e.key==="ArrowRight")step(1);});
+  /* drag and drop: a plan row (or a sidebar plan) onto a tag in the sidebar; PUT /api/layout */
   var L=window.__LAYOUT||{folders:{}};
-  function desc(fid){var out={};out[fid]=1;var grew=true;while(grew){grew=false;Object.keys(L.folders).forEach(function(id){if(!out[id]&&out[L.folders[id].parent]){out[id]=1;grew=true;}});}return out;}
   var dragging=null;
-  document.querySelectorAll("[data-drag]").forEach(function(el){el.addEventListener("dragstart",function(e){dragging=el.dataset.drag;e.dataTransfer.setData("text/plain",dragging);e.dataTransfer.effectAllowed="move";el.classList.add("drag");
-      if(dragging.indexOf("folder:")===0){var d=desc(dragging.slice(7));document.querySelectorAll("[data-drop]").forEach(function(t){var v=t.dataset.drop;if(v.indexOf("folder:")===0&&d[v.slice(7)])t.classList.add("nodrop");});}});
+  document.querySelectorAll("[data-drag]").forEach(function(el){el.addEventListener("dragstart",function(e){dragging=el.dataset.drag;e.dataTransfer.setData("text/plain",dragging);e.dataTransfer.effectAllowed="move";el.classList.add("drag");});
     el.addEventListener("dragend",function(){el.classList.remove("drag");dragging=null;document.querySelectorAll(".nodrop,.over").forEach(function(t){t.classList.remove("nodrop");t.classList.remove("over");});});});
-  document.querySelectorAll("[data-drop]").forEach(function(t){t.addEventListener("dragover",function(e){if(!dragging||t.classList.contains("nodrop"))return;e.preventDefault();e.dataTransfer.dropEffect="move";t.classList.add("over");});
+  document.querySelectorAll("[data-drop]").forEach(function(t){t.addEventListener("dragover",function(e){if(!dragging||dragging.indexOf("plan:")!==0)return;e.preventDefault();e.dataTransfer.dropEffect="move";t.classList.add("over");});
     t.addEventListener("dragleave",function(){t.classList.remove("over");});
-    t.addEventListener("drop",function(e){e.preventDefault();t.classList.remove("over");var src=e.dataTransfer.getData("text/plain")||dragging;if(!src||t.classList.contains("nodrop"))return;var target=t.dataset.drop;var fid=target.indexOf("folder:")===0?target.slice(7):"";
-      var body=src.indexOf("plan:")===0?{op:"file",key:src.slice(5),fid:fid}:{op:"move",fid:src.slice(7),parent:fid};
-      if(body.op==="move"&&body.fid===fid)return;
+    t.addEventListener("drop",function(e){e.preventDefault();t.classList.remove("over");var src=e.dataTransfer.getData("text/plain")||dragging;if(!src||src.indexOf("plan:")!==0)return;var target=t.dataset.drop;var fid=target.indexOf("folder:")===0?target.slice(7):"";
+      var body={op:"file",key:src.slice(5),fid:fid};
       fetch("/api/layout",{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify(body)}).then(function(r){return r.json();}).then(function(j){if(j.error){alert(j.error);return;}L=j.layout||L;
-        /* update counts and the moved row's folder cell without a reload */
         Object.keys(j.counts||{}).forEach(function(id){document.querySelectorAll('[data-count="'+id+'"]').forEach(function(n){n.textContent=j.counts[id];});});
-        if(body.op==="file"){var tr=document.querySelector('tr[data-key="'+body.key+'"]');if(tr){var cell=tr.querySelector("td.folder");if(cell)cell.innerHTML=j.folderHtml||"";var view=document.body.dataset.view||"";if(view&&view!==("folder:"+fid)&&view!=="all")tr.style.display="none";}}
-        else location.reload();
+        var tr=document.querySelector('tr[data-key="'+body.key+'"]');if(tr){var cell=tr.querySelector('td[data-col="folder"]');if(cell)cell.innerHTML=j.folderHtml||"";var view=document.body.dataset.view||"";if(view.indexOf("folder:")===0&&view!==("folder:"+fid))tr.style.display="none";}
       }).catch(function(){alert("Could not move: the home page did not answer.");});});});
 })();`;
-const page = (title, crumb, body, serverUp, { pills = "", sidebar = "", layout = null, view = "" } = {}) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,600&family=Public+Sans:wght@400;600;700&display=swap" rel="stylesheet"><style>${CSS}</style><script>try{var t=localStorage.getItem("lavish-home:theme");if(t)document.documentElement.setAttribute("data-theme",t);}catch(e){}</script></head><body${view ? ` data-view="${esc(view)}"` : ""}>
-<div class="top"><a class="logo" href="/">${monogram("Lavish", { size: 24 })}Lavish</a><span class="crumb">${esc(crumb)}</span><span class="sp"></span>${sidebar ? '<div class="search"><span aria-hidden="true">⌕</span><input id="q" type="search" placeholder="Search plans" autocomplete="off"></div>' : ""}${pills}<button class="tbtn" id="themeToggle" type="button" title="Light / dark (follows the system until you pick; saved in this browser)" aria-label="Toggle theme">◐</button><span class="pill ${serverUp ? "on" : "off"}">lavish :${process.env.LAVISH_AXI_PORT || 4387} ${serverUp ? "up" : "down"}</span></div>
-${sidebar ? `<div class="shell"><aside class="side">${sidebar}</aside><main>${body}</main></div>` : `<main style="max-width:1280px;margin:0 auto">${body}</main>`}
-<script>window.__LAYOUT=${JSON.stringify(layout ? { folders: layout.folders } : { folders: {} }).replace(/<\//g, "<\\/")};${CLIENT_JS}</script></body></html>`;
+const FONTS = `<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">`;
+const page = (title, crumb, body, serverUp, { pills = "", sidebar = "", layout = null, view = "", key = "" } = {}) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title>${FONTS}<style>${CSS}</style><script>try{var t=localStorage.getItem("lavish-home:theme");if(t)document.documentElement.setAttribute("data-theme",t);if(localStorage.getItem("lavish-home:side-hidden")==="1"||localStorage.getItem("lavish-home:side-hidden")==='"1"')document.documentElement.classList.add("nos");}catch(e){}</script></head><body${view ? ` data-view="${esc(view)}"` : ""}${key ? ` data-key="${esc(key)}"` : ""}>
+<div class="top">${sidebar ? `<button class="tbtn" id="sideShow" type="button" title="Show the sidebar">☰</button>` : ""}<a class="logo" href="/">Lavish</a><span class="crumb">${esc(crumb)}</span><span class="sp"></span>${sidebar && view ? '<div class="search"><span aria-hidden="true">⌕</span><input id="q" type="search" placeholder="Search plans" autocomplete="off"></div>' : ""}${pills}<button class="tbtn" id="themeToggle" type="button" title="Light / dark (follows the system until you pick; saved in this browser)" aria-label="Toggle theme">◐</button><span class="pill lv-pill ${serverUp ? "on" : "off"}" title="The Lavish server on :${process.env.LAVISH_AXI_PORT || 4387}"><span class="ld"></span>lavish ${serverUp ? "up" : "down"}</span></div>
+${sidebar ? `<div class="shell"><aside class="side">${sidebar}<div class="rzs" title="Drag to resize the sidebar"></div></aside><main>${body}</main></div>` : `<main style="max-width:1280px;margin:0 auto">${body}</main>`}
+<script>window.__LAYOUT=${JSON.stringify(layout ? { folders: layout.folders } : { folders: {} }).replace(/<\//g, "<\\/")};window.__COLS=${JSON.stringify(COLUMNS.map((c) => ({ k: c.k, on: c.on })))};${CLIENT_JS}</script></body></html>`;
 const errorPage = (title, message, { back = "/", extra = "" } = {}, serverUp = true) => page(title, title, `<div class="errpage"><h1>${esc(title)}</h1><p>${esc(message)}</p>${extra}<p class="meta"><a class="a" href="${esc(back)}">← Back</a></p></div>`, serverUp);
 
 function planChip(plan) {
-  const label = plan.status.replace("-", " ");
-  const title = plan.note ? plan.note : plan.inferred ? "Inferred from PR states and review activity. Set it with lavish-meta, in the row, or on the session page." : "Declared with lavish-meta or <meta name=lavish:status>";
-  return `<span class="plan ${esc(plan.status)}${plan.inferred ? " inferred" : ""}" title="${esc(title)}">${esc(label)}${plan.inferred ? " ?" : ""}</span>${plan.priority === "high" ? ' <span class="prio high">high</span>' : ""}`;
+  const [label, tone] = STATUS_WORDS[plan.status] || [plan.status.replace("-", " "), "mute"];
+  const title = plan.note ? plan.note : plan.inferred ? "Inferred from PR states and review activity. Set it with lavish-meta, in the row, or on the plan page." : "Declared with lavish-meta or <meta name=lavish:status>";
+  return dotWord(tone, label, title, plan.inferred);
 }
 function prChips(plan) {
   if (!plan.prs.length) return `<span class="num">–</span>`;
@@ -413,82 +520,108 @@ function prChips(plan) {
     return href ? `<a class="pr ${esc(p.state || "")}${p.source === "inferred" ? " inferred" : ""}" href="${esc(href)}" target="_blank" rel="noopener" title="${esc(title)}">${inner}</a>` : `<span class="pr ${p.source === "inferred" ? "inferred" : ""}" title="${esc(title)}">${inner}</span>`;
   }).join("");
 }
-/** The Session cell: agent state first, Lavish's review state as a second line. */
+/** Where the agent lives right now, as a word: VS Code · terminal · Desktop · ended 2 d ago. */
+function agentPlace(a) {
+  if (a.state === "none") return "";
+  if (a.state === "active") return a.terminal ? "terminal" : a.entrypointLabel || "editor";
+  return `ended ${ago(a.at)}`.trim();
+}
+/** The Session cell: the agent's name, then a small line with Model · place · Lavish's review state. */
 function agentCell(s) {
   const a = s.agent;
   let top;
   if (a.state === "none") top = `<span class="ag none">not connected</span>`;
   else {
     const dot = a.state === "active" ? '<span class="dot"></span>' : "";
-    const where = a.state === "active" ? (a.terminal ? "terminal" : a.entrypointLabel || "") : ago(a.at);
     const title = `${a.provider} ${a.id}${a.cwd ? ` · ${a.cwd}` : ""}${a.source === "scan" ? " · linked by the transcript scan (dotted): a real poll replaces it" : ""}${a.guessed ? " · guessed: several live Codex threads in this folder" : ""}`;
-    top = `<span class="ag ${a.state}${a.source === "scan" ? " scan" : ""}${a.guessed ? " guessed" : ""}" title="${esc(title)}">${dot}${glyph(a.provider)}<span class="name">${esc(a.name)}</span>${where ? ` · ${esc(where)}` : ""}${a.state === "ended" ? " · ended" : ""}</span>`;
+    top = `<span class="ag ${a.state}${a.source === "scan" ? " scan" : ""}${a.guessed ? " guessed" : ""}" title="${esc(title)}">${dot}${glyph(a.provider)}<span class="name">${esc(a.name)}</span></span>`;
   }
-  const lv = !s.exists ? `<span class="st orphan">orphaned</span>` : s.status === "ended" ? `lavish ended · ${esc(s.endedBy || "?")}` : s.stale ? `lavish open · stale` : `lavish ${esc(s.status)}${s.pending ? ` · ${s.pending} pending` : ""}`;
-  return `${top}<span class="lv">${lv}</span>`;
+  const bits = [];
+  const model = modelName((s.reg.launch || {}).model);
+  if (a.state !== "none" && model) bits.push(model);
+  if (a.state !== "none") bits.push(agentPlace(a));
+  if (!s.exists) bits.push(`<span class="st orphan">orphaned</span>`);
+  else if (s.status === "ended") bits.push("lavish ended");
+  else if (s.stale) bits.push("lavish stale");
+  else if (s.pending) bits.push(`${s.pending} pending`);
+  return `<div class="two">${top}${bits.length ? `<span class="lv">${bits.map((b) => (b.startsWith("<") ? b : esc(b))).join(" · ")}</span>` : ""}</div>`;
 }
-const folderCellHtml = (s) => (s.folderPath.length ? s.folderPath.map((f, i) => `<a class="a" style="margin:0" href="/?folder=${esc(f.id)}">${esc(f.name)}</a>${i < s.folderPath.length - 1 ? ' <span class="num">›</span> ' : ""}`).join("") : `<span class="num" title="Unfiled: grouped under its project">–</span>`);
+const folderCellHtml = (s) => (s.folderPath.length ? `<span class="tags">${s.folderPath.map((f) => `<a class="tg1" href="/?folder=${esc(f.id)}">${esc(f.name)}</a>`).join("")}</span>` : `<span class="num">–</span>`);
 /** counts per folder (its plans and its descendants' plans) */
 function folderCounts(layout, sessions) {
   const counts = {};
   for (const s of sessions) { if (!s.folder) continue; let cur = s.folder; const seen = new Set(); while (cur && layout.folders[cur] && !seen.has(cur)) { seen.add(cur); counts[cur] = (counts[cur] || 0) + 1; cur = layout.folders[cur].parent; } }
   return counts;
 }
+/** The sidebar shared by the index and the plan page: All plans · Active now · projects with their plans nested · tags. */
+function renderSidebar(sessions, layout, { view = "", agent = "", current = "", counts = {} } = {}) {
+  const live = sessions.filter((s) => !["retired", "superseded"].includes(s.plan.status));
+  const projects = [...new Set(sessions.map((s) => s.project))]; // sessions are newest first, so projects follow their latest activity, like the tables
+  const projNav = projects.map((p) => {
+    const plans = live.filter((s) => s.project === p);
+    return `<details class="proj" open data-proj="${esc(p)}"><summary class="nav ${view === `project:${p}` ? "on" : ""}" data-drag="project:${esc(p)}" draggable="true" title="${esc(p)}: click to collapse; drag to reorder">${ICON.folder}${ICON.folderOpen}<span class="t">${esc(p)}</span><span class="n">${plans.length}</span></summary>
+      ${plans.map((s) => `<div class="navwrap hc"><a class="nav plan ${current === s.key ? "on" : ""}" href="/session/${s.key}" data-key="${s.key}" data-drag="plan:${s.key}" draggable="true">${esc(s.title)}</a>${hoverCard(s)}</div>`).join("")}
+      ${plans.length > 5 ? `<button class="more" type="button">Show more</button>` : ""}</details>`;
+  }).join("");
+  const tags = Object.entries(layout.folders).sort((a, b) => a[1].name.localeCompare(b[1].name));
+  return `<div class="shead"><button id="sideHide" type="button" title="Hide the sidebar">${ICON.hide}</button><span class="sp"></span><button id="prevPlan" type="button" title="Previous plan (←)">←</button><button id="nextPlan" type="button" title="Next plan (→)">→</button></div>
+  <a class="nav ${view === "all" ? "on" : ""}" href="/" data-drop="root">${ICON.all}<span class="t">All plans</span><span class="n">${sessions.length}</span></a>
+  <a class="nav ${agent === "any-active" ? "on" : ""}" href="/?agent=any-active">${ICON.active}<span class="t">Active now</span><span class="n">${sessions.filter((s) => s.agent.state === "active").length}</span></a>
+  <h4>Projects</h4>${projNav}
+  <h4>Tags</h4>${tags.map(([id, f]) => `<a class="nav ${view === `folder:${id}` ? "on" : ""}" href="/?folder=${esc(id)}" data-drop="folder:${esc(id)}" title="Drop a plan here to tag it">${ICON.tag}<span class="t">${esc(f.name)}</span><span class="n" data-count="${esc(id)}">${counts[id] || 0}</span></a>`).join("") || '<p class="meta" style="margin:2px 10px 6px">None yet.</p>'}
+  <form class="newf" method="post" action="/folders"><input name="name" placeholder="New tag" required maxlength="80" aria-label="New tag"><button type="submit" title="Create the tag">+</button></form>`;
+}
 
-const PRIO_RANK = { high: 0, normal: 1, low: 2 };
 function renderIndex(sessions, q, serverUp, layout) {
   const folder = q.get("folder") || "", project = q.get("project") || "";
   const status = q.get("status") || "", plan = q.get("plan") || "", prio = q.get("prio") || "", stage = q.get("stage") || "", agent = q.get("agent") || "";
-  const showRetired = q.get("retired") === "1" || plan === "retired" || plan === "superseded" || stage === "parked";
+  const showRetired = plan === "retired" || plan === "superseded" || stage === "parked";
   const counts = folderCounts(layout, sessions);
   const inFolder = folder ? folderDescendants(layout, folder) : null;
   const shown = sessions.filter((s) => (!folder || (s.folder && inFolder.has(s.folder)))
-    && (!project || (s.project === project && !s.folder))
+    && (!project || s.project === project)
     && (!status || (status === "orphan" ? !s.exists : status === "stale" ? s.stale : s.status === status))
     && (!agent || (agent === "terminal" ? s.agent.state === "active" && s.agent.terminal : agent === "active" ? s.agent.state === "active" && !s.agent.terminal : agent === "any-active" ? s.agent.state === "active" : s.agent.state === agent))
     && (!plan || (plan === "unworked" ? s.plan.unworked : s.plan.status === plan))
     && (!prio || s.plan.priority === prio)
     && (!stage || s.plan.stage === stage)
-    && (showRetired || !["retired", "superseded"].includes(s.plan.status)))
-    .sort((a, b) => (PRIO_RANK[a.plan.priority] - PRIO_RANK[b.plan.priority]) || (b.updated - a.updated));
-  const current = { ...(folder ? { folder } : {}), ...(project ? { project } : {}), ...(status ? { status } : {}), ...(agent ? { agent } : {}), ...(plan ? { plan } : {}), ...(prio ? { prio } : {}), ...(stage ? { stage } : {}), ...(q.get("retired") === "1" ? { retired: "1" } : {}) };
-  const keep = (k, v, drop = []) => { const c = { ...current, [k]: v }; for (const d of drop) delete c[d]; return new URLSearchParams(c).toString().replace(/[^=&]+=(&|$)/g, ""); };
-  const chip = (label, params, on) => `<a class="chip ${on ? "on" : ""}" href="/?${params}">${esc(label)}</a>`;
-  const filters = `<div class="filters"><span>Agent:</span>${chip("All", keep("agent", ""), !agent)}${chip("not connected", keep("agent", "none"), agent === "none")}${chip("active", keep("agent", "active"), agent === "active")}${chip("in terminal", keep("agent", "terminal"), agent === "terminal")}${chip("ended", keep("agent", "ended"), agent === "ended")}<span style="margin-left:14px">Lavish:</span>${chip("any", keep("status", ""), !status)}${["open", "ended", "stale", "orphan"].map((s) => chip(s, keep("status", s), status === s)).join("")}</div>
-  <div class="filters"><span>Stage:</span>${chip("any", keep("stage", ""), !stage)}${[...STAGES, "parked"].map((x) => chip(STAGE_LABELS[x], keep("stage", x), stage === x)).join("")}<span style="margin-left:14px">Plan:</span>${chip("any", keep("plan", ""), !plan)}${chip("unworked", keep("plan", "unworked"), plan === "unworked")}${STATUSES.map((p) => chip(p.replace("-", " "), keep("plan", p), plan === p)).join("")}<span style="margin-left:14px">Priority:</span>${chip("any", keep("prio", ""), !prio)}${PRIORITIES.map((p) => chip(p, keep("prio", p), prio === p)).join("")}${chip(showRetired ? "hide retired" : "show retired", keep("retired", showRetired ? "" : "1"), false)}</div>`;
+    && (showRetired || !["retired", "superseded"].includes(s.plan.status)));
+  const current = { ...(folder ? { folder } : {}), ...(project ? { project } : {}), ...(status ? { status } : {}), ...(agent ? { agent } : {}), ...(plan ? { plan } : {}), ...(prio ? { prio } : {}), ...(stage ? { stage } : {}) };
+  const keep = (k, v, drop = []) => { const c = { ...current, [k]: v }; for (const d of drop) delete c[d]; return new URLSearchParams(c).toString().replace(/[^=&]+=(&|$)/g, "").replace(/&$/, ""); };
+  const filtered = Boolean(status || agent || plan || prio || stage);
+  const home = !folder && !project && !filtered;
+  const view = folder ? `folder:${folder}` : project ? `project:${project}` : filtered ? "filtered" : "all";
+  // Drive-style filter buttons: each opens a popover of today's chips with the same query keys; nothing moves when one opens.
+  const FILTERS = [
+    { k: "agent", label: "Agent", cur: agent, opts: [["", "any"], ["none", "not connected"], ["active", "active in an editor"], ["terminal", "in a terminal"], ["any-active", "any active"], ["ended", "ended"]] },
+    { k: "stage", label: "Stage", cur: stage, opts: [["", "any"], ...[...STAGES, "parked"].map((x) => [x, STAGE_LABELS[x]])] },
+    { k: "plan", label: "Plan", cur: plan, opts: [["", "any"], ["unworked", "unworked"], ...STATUSES.map((p) => [p, (STATUS_WORDS[p] || [p])[0]])] },
+    { k: "prio", label: "Priority", cur: prio, opts: [["", "any"], ...PRIORITIES.map((p) => [p, p])] },
+    { k: "status", label: "Lavish", cur: status, opts: [["", "any"], ["open", "open"], ["ended", "ended"], ["stale", "stale"], ["orphan", "orphaned"]] },
+    { k: "folder", label: "Tags", cur: folder, opts: [["", "any"], ...Object.entries(layout.folders).sort((a, b) => a[1].name.localeCompare(b[1].name)).map(([id, f]) => [id, f.name])] },
+  ];
+  const fbtn = (f) => { const curLabel = (f.opts.find((o) => o[0] === f.cur) || [])[1] || ""; return `<details class="fbtn ${f.cur ? "on" : ""}"><summary>${esc(f.label)}${f.cur ? ` · ${esc(curLabel)}` : ""} <span class="ch">▾</span></summary><div class="pop">${f.opts.map(([v, label]) => `<a class="${f.cur === v ? "on" : ""}" href="/?${keep(f.k, v)}">${esc(label)}</a>`).join("")}</div></details>`; };
+  const colsBtn = `<details class="fbtn" style="margin-left:auto"><summary>Columns <span class="ch">▾</span></summary><div class="pop right" id="colsPop"><div class="h">Shown</div>${COLUMNS.map((c) => `<label class="${c.fixed ? "fixed" : ""}"><input type="checkbox" value="${c.k}"${c.on ? " checked" : ""}${c.fixed ? " disabled" : ""}> ${esc(c.label)}</label>`).join("")}</div></details>`;
+  const fbar = `<div class="fbar">${FILTERS.map(fbtn).join("")}${Object.keys(current).length ? `<a class="a" href="/" style="font-size:12.5px">Clear</a>` : ""}${colsBtn}</div>`;
   const back = encodeURIComponent("/?" + new URLSearchParams(current).toString());
-  // sidebar
-  const projects = [...new Set(sessions.map((s) => s.project))].sort();
-  const unfiled = (p) => sessions.filter((s) => s.project === p && !s.folder && (showRetired || !["retired", "superseded"].includes(s.plan.status))).length;
-  const tree = folderTree(layout);
-  const navFolder = (n, depth) => `<a class="nav ${depth ? `sub${Math.min(depth, 3)}` : ""} ${folder === n.id ? "on" : ""}" href="/?folder=${esc(n.id)}" data-drop="folder:${esc(n.id)}" data-drag="folder:${esc(n.id)}" draggable="true"><span class="ic">▰</span>${esc(n.name)}<span class="n" data-count="${esc(n.id)}">${counts[n.id] || 0}</span></a>${n.children.map((c) => navFolder(c, depth + 1)).join("")}`;
-  const sidebar = `<a class="nav ${!folder && !project ? "on" : ""}" href="/" data-drop="root"><span class="ic">▣</span>All plans<span class="n">${sessions.length}</span></a>
-  <a class="nav ${agent === "any-active" ? "on" : ""}" href="/?agent=any-active"><span class="ic"><span class="dot" style="animation:none"></span></span>Active now<span class="n">${sessions.filter((s) => s.agent.state === "active").length}</span></a>
-  <h4>Projects <span style="font-weight:400;letter-spacing:0;text-transform:none">· unfiled plans</span></h4>${projects.map((p) => `<a class="nav ${project === p ? "on" : ""}" href="/?project=${encodeURIComponent(p)}" data-drop="root">${monogram(p, { size: 18 })}${esc(p)}<span class="n">${unfiled(p)}</span></a>`).join("")}
-  <h4>Folders</h4>${tree.map((n) => navFolder(n, 0)).join("") || '<p class="meta" style="margin:2px 10px 6px">None yet. Drag a plan onto a folder once you have one.</p>'}
-  <form class="newf" method="post" action="/folders"><input type="hidden" name="parent" value="${esc(folder)}"><input name="name" placeholder="${folder ? "New subfolder" : "New folder"}" required maxlength="80"><button type="submit">+</button></form>`;
-  // header + strip + tiles
-  const crumbs = folder ? `<div class="crumbs"><a href="/">All plans</a>${folderPath(layout, folder).map((f, i, arr) => ` › ${i === arr.length - 1 ? `<b>${esc(f.name)}</b>` : `<a href="/?folder=${esc(f.id)}">${esc(f.name)}</a>`}`).join("")}</div>` : project ? `<div class="crumbs"><a href="/">All plans</a> › <b>${esc(project)}</b> <span>· unfiled</span></div>` : `<div class="crumbs"><b>All plans</b></div>`;
-  const active = sessions.filter((s) => s.agent.state === "active").sort((a, b) => String(b.agent.at).localeCompare(String(a.agent.at)));
-  const strip = !folder && !project && active.length ? `<div class="strip" title="Sessions that are running right now. Click one to jump to its plan.">${active.map((s) => `<a href="#row-${s.key}" title="${esc(s.title)} · ${esc(s.agent.name)} · ${esc(s.agent.terminal ? "terminal" : s.agent.entrypointLabel)}"><span class="av">${monogram(s.project, { logo: s.logo, key: s.key, size: 44 })}<span class="dot"></span></span><span class="t">${esc(s.agent.name)}</span><small>${esc(s.title)}</small></a>`).join("")}</div>` : "";
-  const children = folder ? (tree.length ? (function find(list) { for (const n of list) { if (n.id === folder) return n.children; const r = find(n.children); if (r) return r; } return null; })(tree) || [] : []) : (!project ? tree : []);
-  const tileActs = (n) => `<span class="acts"><form class="inline" method="post" action="/folders/${esc(n.id)}" onsubmit="var v=prompt('Rename folder',this.name.value);if(v===null)return false;this.name.value=v;return true"><input type="hidden" name="op" value="rename"><input type="hidden" name="name" value="${esc(n.name)}"><button type="submit" title="Rename">✎</button></form><form class="inline" method="post" action="/folders/${esc(n.id)}" onsubmit="return confirm('Delete the folder ${esc(n.name)}? Its plans and subfolders move up one level; nothing is lost.')"><input type="hidden" name="op" value="delete"><button type="submit" title="Delete (plans and subfolders move up)">🗑</button></form></span>`;
-  const tiles = children.length ? `<div class="tiles">${children.map((n) => `<a class="tile" href="/?folder=${esc(n.id)}" data-drop="folder:${esc(n.id)}" data-drag="folder:${esc(n.id)}" draggable="true"><span class="fi">▰</span>${esc(n.name)}${tileActs(n)}<span class="n" data-count="${esc(n.id)}">${counts[n.id] || 0}</span></a>`).join("")}</div>` : "";
-  const folderRow = folder ? `<p class="meta" style="margin:0 0 8px">${counts[folder] || 0} plan${counts[folder] === 1 ? "" : "s"} · <form class="inline" method="post" action="/folders/${esc(folder)}" onsubmit="var v=prompt('Rename folder',this.name.value);if(v===null)return false;this.name.value=v;return true"><input type="hidden" name="op" value="rename"><input type="hidden" name="name" value="${esc(layout.folders[folder]?.name || "")}"><button class="a" type="submit">Rename</button></form><form class="inline" method="post" action="/folders/${esc(folder)}" onsubmit="return confirm('Delete this folder? Its plans and subfolders move up one level; nothing is lost.')"><input type="hidden" name="op" value="delete"><button class="a" type="submit">Delete folder</button></form> Move to <form class="inline" method="post" action="/folders/${esc(folder)}"><input type="hidden" name="op" value="move"><select class="inline" name="parent" onchange="this.form.submit()"><option value="">— root</option>${folderOptions(layout, layout.folders[folder]?.parent || "", folderDescendants(layout, folder))}</select></form></p>` : "";
-  // table(s)
+  const sidebar = renderSidebar(sessions, layout, { view, agent, counts });
+  const crumbs = folder ? `<div class="crumbs"><a href="/">All plans</a> › <b>${esc(layout.folders[folder]?.name || "Tag")}</b></div>` : project ? `<div class="crumbs"><a href="/">All plans</a> › <b>${esc(project)}</b></div>` : `<div class="crumbs"><b>All plans</b>${filtered ? " <span>· filtered</span>" : ""}</div>`;
+  const tagRow = folder ? `<p class="meta" style="margin:0 0 8px">${counts[folder] || 0} plan${counts[folder] === 1 ? "" : "s"} · <form class="inline" method="post" action="/folders/${esc(folder)}" onsubmit="var v=prompt('Rename tag',this.name.value);if(v===null)return false;this.name.value=v;return true"><input type="hidden" name="op" value="rename"><input type="hidden" name="name" value="${esc(layout.folders[folder]?.name || "")}"><button class="a" type="submit">Rename</button></form><form class="inline" method="post" action="/folders/${esc(folder)}" onsubmit="return confirm('Delete this tag? The plans keep everything else.')"><input type="hidden" name="op" value="delete"><button class="a" type="submit">Delete tag</button></form></p>` : "";
+  // one table per project, newest first inside it
   const groups = new Map();
-  for (const s of shown) { const g = folder ? (s.folder === folder ? "" : folderPath(layout, s.folder).slice(folderPath(layout, folder).length).map((f) => f.name).join(" › ")) : s.project; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(s); }
-  const cols = `<colgroup><col data-col="plan" style="width:34%"><col data-col="folder" style="width:13%"><col data-col="status" style="width:15%"><col data-col="session" style="width:20%"><col data-col="actions" style="width:18%"></colgroup>`;
-  const head = `<thead><tr><th data-col="plan">Plan<span class="rz"></span></th><th data-col="folder">Folder<span class="rz"></span></th><th data-col="status">Status<span class="rz"></span></th><th data-col="session">Session<span class="rz"></span></th><th data-col="actions">Actions</th></tr></thead>`;
-  const pills = `<span class="pill">${sessions.length} plans · ${sessions.filter((s) => s.agent.state === "active").length} active · ${sessions.filter((s) => s.plan.unworked).length} unworked · ${sessions.filter((s) => s.plan.status === "in-progress").length} in progress</span>`;
-  let body = `${crumbs}<h1>${folder ? esc(layout.folders[folder]?.name || "Folder") : project ? esc(project) : "Lavish plans"}</h1>${folderRow}<p class="meta">${folder || project ? "" : "Every plan on this machine. Drag a row onto a folder (sidebar or tile) to file it; Move-to does the same from the keyboard. Hover a title for its summary, PRs and review counts. Resume puts you back in front of the agent that wrote the plan; New session starts a fresh one that opens and polls it."}</p>${strip}${tiles}${filters}`;
+  for (const s of shown) { if (!groups.has(s.project)) groups.set(s.project, []); groups.get(s.project).push(s); }
+  const cols = `<colgroup>${COLUMNS.map((c) => `<col data-col="${c.k}" data-w="${c.w}" style="width:${c.on ? c.w : "0"}">`).join("")}</colgroup>`;
+  const head = `<thead><tr>${COLUMNS.map((c) => `<th data-col="${c.k}"${c.nosort ? " data-nosort" : ""} class="${c.on ? "" : "off"}">${esc(c.label)}${c.k !== "actions" ? '<span class="rz"></span>' : ""}</th>`).join("")}</tr></thead>`;
+  const pills = `<span class="pill">${sessions.length} plans · ${sessions.filter((s) => s.agent.state === "active").length} active</span>`;
+  let body = `${crumbs}<h1>${folder ? esc(layout.folders[folder]?.name || "Tag") : project ? esc(project) : "All plans"}</h1>${tagRow}${fbar}`;
   if (!shown.length) body += `<p class="empty">Nothing here.</p>`;
   for (const [g, list] of groups) {
-    body += `${g ? `<div class="grp">${esc(g)}<span>${list.length} plan${list.length === 1 ? "" : "s"} · last activity ${fmtDay(list.slice().sort((a, b) => b.updated - a.updated)[0].updated)}</span></div>` : ""}<div class="tw"><table data-cols="1">${cols}${head}<tbody>`;
-    for (const s of list) body += row(s, back, layout);
-    body += `</tbody></table></div>`;
+    const gid = g.replace(/[^a-z0-9]/gi, "-").toLowerCase();
+    body += `${!project ? `<div class="grp"><a href="/?project=${encodeURIComponent(g)}" title="Open the project: every plan, no Show more">${esc(g)}</a><span>${list.length} plan${list.length === 1 ? "" : "s"}${home && list.length > 5 ? " · newest 5" : ""}</span></div>` : ""}<div class="tw"><table data-cols="1" data-grp="${esc(gid)}">${cols}${head}<tbody>`;
+    list.forEach((s, i) => { body += row(s, back, layout, { i, hide: home && i >= 5 }); });
+    body += `</tbody></table></div>${home && list.length > 5 ? `<button class="more" type="button" data-grp="${esc(gid)}">Show ${Math.min(10, list.length - 5)} more</button>` : ""}`;
   }
-  return page(folder ? `${layout.folders[folder]?.name || "Folder"} · Lavish` : "Lavish home", folder ? folderPath(layout, folder).map((f) => f.name).join(" › ") : project || "all plans", body, serverUp, { pills, sidebar, layout, view: folder ? `folder:${folder}` : project ? `project:${project}` : "all" });
+  return page(folder ? `${layout.folders[folder]?.name || "Tag"} · Lavish` : project ? `${project} · Lavish` : "Lavish home", folder ? layout.folders[folder]?.name || "tag" : project || "all plans", body, serverUp, { pills, sidebar, layout, view });
 }
 function folderOptions(layout, selected = "", exclude = new Set()) {
   const out = [];
@@ -496,114 +629,145 @@ function folderOptions(layout, selected = "", exclude = new Set()) {
   walk(folderTree(layout), 0);
   return out.join("");
 }
-function statusSelect(s, back) {
-  const opts = STATUSES.map((x) => `<option value="${x}"${(s.reg.status ? normalizeStatus(s.reg.status) : "") === x ? " selected" : ""}>${x.replace("-", " ")}</option>`).join("");
-  return `<form class="inline" method="post" action="/status/${s.key}?back=${back}">${planChip(s.plan)}<br><select class="inline" name="status" onchange="this.form.submit()" title="Set the plan status (the chip above shows what is in effect)"><option value="">— infer</option>${opts}</select></form>`;
+/** Plan status cell: the word in effect, and a select that appears on hover or focus. */
+function statusCell(s, back) {
+  const opts = STATUSES.map((x) => `<option value="${x}"${(s.reg.status ? normalizeStatus(s.reg.status) : "") === x ? " selected" : ""}>${(STATUS_WORDS[x] || [x])[0]}</option>`).join("");
+  return `<div class="sw">${planChip(s.plan)}<form class="inline" method="post" action="/status/${s.key}?back=${back}"><select class="inline" name="status" onchange="this.form.submit()" title="Set the plan status (the word shows what is in effect)" aria-label="Plan status"><option value="">— infer</option>${opts}</select></form></div>`;
 }
 function hoverCard(s) {
   const latest = s.plan.progress.latest;
+  const a = s.agent;
   return `<div class="card"><p>${esc(s.plan.summary || "No summary (add <meta name=description> to the plan or set one on its page).")}</p>
+  <p><span class="k">Plan</span>${planChip(s.plan)} &nbsp; <span class="k">Build</span>${dotWord(s.plan.build.tone, s.plan.build.label, s.plan.build.why)} <span class="meta">· ${esc(s.plan.build.why)}</span></p>
   <p><span class="k">PRs</span>${prChips(s.plan)}</p>
   <p><span class="k">Review</span>${s.agentMsgs} ${s.agentMsgs === 1 ? "reply" : "replies"} · ${s.userSent} sent${s.privateNotes ? ` · ${s.privateNotes} private` : ""}${s.unsentCount ? ` · ${s.unsentCount} unsent` : ""} &nbsp; <span class="k">Versions</span>${s.versionCount || 0} &nbsp; <span class="k">Priority</span>${esc(s.plan.priority)}</p>
   ${latest ? `<p><span class="k">Latest</span>${esc(latest.text)} · ${esc(latest.session?.label || "")} · ${fmtDay(latest.at)}</p>` : ""}
-  <p><span class="k">Updated</span>${fmt(s.updated)} &nbsp; <span class="k">Agent</span>${s.agent.state === "none" ? "not connected" : `${esc(s.agent.name)} · ${esc(s.agent.provider)} · ${esc(s.agent.state)}`}</p>
-  <p class="mono" style="color:var(--ink3)">${esc(shortPath(s.resolved || s.file))}</p></div>`;
+  <p><span class="k">Agent</span>${a.state === "none" ? "not connected" : `${esc(a.name)} · ${esc(a.provider)}${modelName((s.reg.launch || {}).model) ? ` · ${esc(modelName(s.reg.launch.model))}` : ""} · ${esc(a.state)}${agentPlace(a) ? ` · ${esc(agentPlace(a))}` : ""}`}</p>
+  <p class="mono" style="color:var(--ink3)">${esc(shortPath(s.resolved || s.file))}${s.moved ? " · path moved, re-linked" : ""}${s.worktree ? ` · worktree ${esc(s.worktree)}` : ""}</p></div>`;
 }
-function row(s, back = "", layout) {
-  const note = !s.exists ? " · file missing" : s.moved ? " · path moved, re-linked" : s.worktree ? ` · worktree ${esc(s.worktree)}` : "";
-  const launch = s.reg.launch || {};
-  const resume = s.agent.state === "none" ? "" : `<form class="inline" method="post" action="/connect/${s.key}" title="${esc(s.agent.state === "active" ? (s.agent.terminal ? "Bring its terminal forward and open the plan in Lavish" : `Live in ${s.agent.entrypointLabel}: opens the plan in Lavish only`) : `Resume ${s.agent.name} in a terminal (${launch.model || "default model"}, ${launch.effort || "default effort"}) and open the plan in Lavish`)}"><input type="hidden" name="model" value="${esc(launch.model || "")}"><input type="hidden" name="effort" value="${esc(launch.effort || "")}"><button class="a" type="submit">Resume</button></form>`;
-  const acts = [
-    s.exists ? `<a class="a" href="/view/${s.key}/" target="_blank" rel="noopener" title="Read the plan as it is on disk: no Lavish chrome, no session change">View</a>` : "",
-    s.exists ? resume : "",
-    s.exists ? `<a class="a" href="/connect/${s.key}?new=1" title="Start a fresh Claude or Codex session in a terminal with a prompt that opens and polls this plan">New session</a>` : "",
-    `<a class="a" href="/session/${s.key}">Log</a>`,
+/** The row's menu (the ⋯ button and the right-click menu clone it). */
+function rowMenu(s, back, layout) {
+  const tags = folderTree(layout);
+  const tagItems = tags.length ? tags.map((n) => `<form method="post" action="/move/${s.key}?back=${back}"><input type="hidden" name="fid" value="${s.folder === n.id ? "" : esc(n.id)}"><button type="submit" class="${s.folder === n.id ? "on" : ""}">${esc(n.name)}</button></form>`).join("") : `<span class="k" style="display:block;padding:6px 10px">No tags yet. Create one in the sidebar.</span>`;
+  return [
+    s.exists ? `<form method="post" action="/open/${s.key}"><button type="submit">${s.status === "ended" ? "Reopen in Lavish" : "Open in Lavish"}</button></form>` : "",
+    s.exists ? `<a href="/session/${s.key}#launch">New session…</a>` : "",
+    `<a href="/session/${s.key}">Log</a>`,
+    `<details><summary>Tag <span class="k">›</span></summary><div class="sub">${tagItems}</div></details>`,
+    "<hr>",
+    s.exists && s.status !== "ended" ? `<form method="post" action="/end/${s.key}" onsubmit="return confirm('End this Lavish session? The plan is not retired.')"><button type="submit">End session</button></form>` : "",
+    s.plan.status !== "retired" ? `<form method="post" action="/status/${s.key}?back=${back}"><input type="hidden" name="status" value="retired"><button type="submit" class="danger" title="Park or abandon this plan (hidden from the default view)">Retire</button></form>` : `<form method="post" action="/status/${s.key}?back=${back}"><input type="hidden" name="status" value=""><button type="submit">Unretire (infer status)</button></form>`,
   ].join("");
-  const moveTo = `<form class="inline" method="post" action="/move/${s.key}?back=${back}"><select class="inline" name="fid" onchange="this.form.submit()" title="Move to a folder (keyboard path; drag the row onto a folder does the same)"><option value="">${s.folder ? "— unfile" : "Move to…"}</option>${folderOptions(layout, s.folder)}</select></form>`;
-  const retire = s.plan.status !== "retired" ? `<form class="inline" method="post" action="/status/${s.key}?back=${back}"><input type="hidden" name="status" value="retired"><button class="a" type="submit" title="Park or abandon this plan (hidden from the default view)">Retire</button></form>` : "";
-  return `<tr id="row-${s.key}" class="${s.plan.status === "retired" ? "retired" : ""}" data-key="${s.key}" data-drag="plan:${s.key}" draggable="true"><td class="name"><div class="hc"><div class="t">${monogram(s.project, { logo: s.logo, key: s.key })}<a href="/session/${s.key}">${esc(s.title)}</a></div>${hoverCard(s)}</div><small title="${esc(s.resolved || s.file)}">${esc(shortPath(s.resolved || s.file))}${note}</small></td><td class="folder">${folderCellHtml(s)}</td><td><span class="stg ${esc(s.plan.stage)}${s.plan.stageInferred ? " inferred" : ""}" title="${esc(s.plan.subLabel)}">${esc(s.plan.stageLabel)}</span><br>${statusSelect(s, back)}</td><td>${agentCell(s)}</td><td>${acts}<br>${moveTo}${retire}</td></tr>`;
+}
+function row(s, back = "", layout, { i = 0, hide = false } = {}) {
+  const p = s.plan, b = p.build, launch = s.reg.launch || {};
+  const resume = s.exists && s.agent.state !== "none" ? `<form class="inline" method="post" action="/connect/${s.key}" title="${esc(s.agent.state === "active" ? (s.agent.terminal ? "Bring its terminal forward and open the plan in Lavish" : `Live in ${s.agent.entrypointLabel}: opens the plan in Lavish only`) : `Resume ${s.agent.name} in a terminal (${modelName(launch.model) || "default model"}, ${launch.effort || "default effort"}) and open the plan in Lavish`)}"><input type="hidden" name="model" value="${esc(launch.model || "")}"><input type="hidden" name="effort" value="${esc(launch.effort || "")}"><button class="a" type="submit">Resume</button></form>` : "";
+  const view = s.exists ? `<a class="a" href="/view/${s.key}/" target="_blank" rel="noopener" title="Read the plan as it is on disk: no Lavish chrome, no session change">View</a>` : "";
+  const reviews = `${s.agentMsgs} ${s.agentMsgs === 1 ? "reply" : "replies"} · ${s.userSent} sent${s.privateNotes ? ` · ${s.privateNotes} private` : ""}`;
+  const cells = {
+    plan: `<div class="hc"><div class="t"><a href="/session/${s.key}">${esc(s.title)}</a><span class="vn" title="${s.versionCount || 0} saved versions">v${s.versionCount || 0}</span>${p.priority === "high" ? '<span class="prio high">high</span>' : ""}${!s.exists ? '<span class="st orphan">missing</span>' : ""}</div>${hoverCard(s)}</div>`,
+    status: statusCell(s, back),
+    build: dotWord(b.tone, b.label, b.why, false),
+    session: agentCell(s),
+    modified: `<span class="num" title="${esc(fmt(s.updated))}">${fmtDay(s.updated)}</span>`,
+    added: `<span class="num" title="${esc(s.added ? fmt(s.added) : "unknown")}">${s.added ? fmtDay(s.added).replace(/^today .*/, "today") : "–"}</span>`,
+    actions: `${view}${resume}<button class="dots" type="button" title="More actions (right-click the row does the same)" aria-label="More actions">⋯</button><div class="menu src">${rowMenu(s, back, layout)}</div>`,
+    folder: folderCellHtml(s),
+    priority: `<span class="prio ${esc(p.priority)}">${esc(p.priority)}</span>`,
+    project: `<a class="a" style="color:var(--ink2)" href="/?project=${encodeURIComponent(s.project)}">${esc(s.project)}</a>`,
+    completed: `<span class="num">${p.completedAt ? fmtDay(p.completedAt) : "–"}</span>`,
+    retired: `<span class="num">${p.retiredAt ? fmtDay(p.retiredAt) : "–"}</span>`,
+    versions: `<span class="num">${s.versionCount || 0}</span>`,
+    reviews: `<span class="num">${esc(reviews)}</span>`,
+  };
+  const sortv = { plan: s.title.toLowerCase(), status: STATUSES.indexOf(p.status), build: b.rank, session: s.agent.state === "none" ? "~" : s.agent.name, modified: s.updated.toISOString(), added: s.added ? new Date(s.added).toISOString() : "", folder: s.folderPath.map((f) => f.name).join(" ").toLowerCase(), priority: PRIO_RANK[p.priority], project: s.project.toLowerCase(), completed: p.completedAt || "", retired: p.retiredAt || "", versions: s.versionCount || 0, reviews: s.agentMsgs + s.userSent };
+  const sortAttrs = Object.entries(sortv).map(([k, v]) => `data-s-${k}="${esc(v)}"`).join(" ");
+  return `<tr id="row-${s.key}" class="${p.status === "retired" ? "retired" : ""}${hide ? " hid" : ""}" data-key="${s.key}" data-drag="plan:${s.key}" draggable="true" data-i="${i}" tabindex="0" ${sortAttrs}>${COLUMNS.map((c) => `<td data-col="${c.k}" class="${c.k === "plan" ? "name" : c.k === "actions" ? "acts" : ""}${c.on ? "" : " off"}">${cells[c.k]}</td>`).join("")}</tr>`;
 }
 function shortPath(p) { return p.replace(os.homedir(), "~").replace("/Library/CloudStorage/Dropbox-Personal/Development/", "/…/"); }
 
-/* ── connect form + agent block (session page) ────────────────────────── */
+/* ── launch forms + agent block (plan page) ──────────────────────────────── */
 const opts = (list, sel) => list.map((x) => `<option value="${esc(x)}"${x === (sel || "default") ? " selected" : ""}>${esc(x)}</option>`).join("");
-function launchForms(s, { isNew = false, cwd = "" } = {}) {
+function launchForms(s, { cwd = "" } = {}) {
   const l = s.reg.launch || {};
   const a = s.agent;
   const provider = l.provider || a.provider || "claude";
-  const resumeForm = a.state === "none" ? `<p class="meta">No agent has polled this plan yet, so there is nothing to resume. Start a New session, or run <span class="mono">lavish-poll</span> from the session that is on it.</p>` :
-    `<form class="xform" method="post" action="/connect/${s.key}"><div class="row"><b>Resume</b> ${glyph(a.provider)} <span class="mono">${esc(a.name)}</span> <span class="meta">${a.state === "active" ? `live${a.terminal ? " in terminal " + esc(a.tmuxName) : " in " + esc(a.entrypointLabel)}` : `ended · ${esc(ago(a.at))}`}</span></div>
-    <div class="row"><label>Model <select name="model">${a.provider === "codex" ? `<option value="">default</option>` : opts(LAUNCH_OPTIONS.claude.models, l.model)}</select></label>${a.provider === "codex" ? `<label>or <input type="text" name="model_free" value="${esc(l.model && !LAUNCH_OPTIONS.codex.models.includes(l.model) ? l.model : "")}" placeholder="codex model (free text)" style="width:160px"></label>` : ""}<label>Effort <select name="effort">${opts(LAUNCH_OPTIONS[a.provider === "codex" ? "codex" : "claude"].efforts, l.effort)}</select></label><button class="b" type="submit">${a.state === "active" ? (a.terminal ? "Bring the terminal forward" : "Open in Lavish") : "Resume in a terminal"}</button></div>
-    <p class="meta" style="margin:0">${a.state === "active" ? (a.terminal ? "Already running in tmux: nothing new is started. Model and effort apply at the next resume." : `The session is live in ${esc(a.entrypointLabel)}: nothing is started (a second writer would corrupt its transcript); the plan opens in Lavish.`) : `Starts <span class="mono">tmux new-session -s ${esc(a.tmuxName)}</span> in <span class="mono">${esc(shortPath(a.cwd || ""))}</span> running <span class="mono">${a.provider === "codex" ? "codex resume" : "claude --resume"} ${esc(String(a.id).slice(0, 8))}…</span>, opens Terminal.app on it, then opens the plan in Lavish. Remembered per plan.`}</p></form>`;
-  const newForm = `<form class="xform" method="post" action="/connect/${s.key}?new=1" style="margin-top:12px"><div class="row"><b>New session</b> <span class="meta">a fresh terminal with a prompt that opens and polls this plan, so it is connected before you type a word</span></div>
-    <div class="row"><label>Provider <select name="provider" onchange="this.form.querySelector('[name=model]').innerHTML=this.value==='codex'?'<option value=\\'\\'>default</option>':'${LAUNCH_OPTIONS.claude.models.map((m) => `<option value=${m}>${m}</option>`).join("")}';this.form.querySelector('[name=effort]').innerHTML=(this.value==='codex'?${JSON.stringify(LAUNCH_OPTIONS.codex.efforts)}:${JSON.stringify(LAUNCH_OPTIONS.claude.efforts)}).map(function(e){return '<option value='+e+'>'+e+'</option>'}).join('')"><option value="claude"${provider !== "codex" ? " selected" : ""}>Claude</option><option value="codex"${provider === "codex" ? " selected" : ""}>Codex</option></select></label>
+  const resumeForm = a.state === "none" ? `<p class="meta" style="margin:0 0 4px">No agent has polled this plan yet, so there is nothing to resume. Start a new session below, or run <span class="mono">lavish-poll</span> from the session that is on it.</p>` :
+    `<form class="xform" method="post" action="/connect/${s.key}"><div class="row"><button class="b" type="submit">${a.state === "active" ? (a.terminal ? "Bring the terminal forward" : "Open in Lavish") : "Resume"}</button> ${glyph(a.provider)} <span class="mono">${esc(a.name)}</span>
+    <label>Model <select name="model">${a.provider === "codex" ? `<option value="">default</option>` : opts(LAUNCH_OPTIONS.claude.models, l.model)}</select></label>${a.provider === "codex" ? `<label>or <input type="text" name="model_free" value="${esc(l.model && !LAUNCH_OPTIONS.codex.models.includes(l.model) ? l.model : "")}" placeholder="codex model (free text)" style="width:160px"></label>` : ""}<label>Effort <select name="effort">${opts(LAUNCH_OPTIONS[a.provider === "codex" ? "codex" : "claude"].efforts, l.effort)}</select></label></div>
+    <p class="meta" style="margin:0">${a.state === "active" ? (a.terminal ? `Already running in tmux ${esc(a.tmuxName)}: nothing new is started. Model and effort apply at the next resume.` : `Live in ${esc(a.entrypointLabel)}: nothing is spawned (a second writer would corrupt its transcript); the plan opens in Lavish.`) : `Ended ${esc(ago(a.at))}. Starts <span class="mono">tmux new-session -s ${esc(a.tmuxName)}</span> in <span class="mono">${esc(shortPath(a.cwd || ""))}</span> running <span class="mono">${a.provider === "codex" ? "codex resume" : "claude --resume"} ${esc(String(a.id).slice(0, 8))}…</span>, opens Terminal.app on it, then the plan in Lavish. Remembered per plan.`}</p></form>`;
+  const newForm = `<form class="xform" method="post" action="/connect/${s.key}?new=1"><div class="row"><b>New</b> <label>Provider <select name="provider" onchange="this.form.querySelector('[name=model]').innerHTML=this.value==='codex'?'<option value=\\'\\'>default</option>':'${LAUNCH_OPTIONS.claude.models.map((m) => `<option value=${m}>${m}</option>`).join("")}';this.form.querySelector('[name=effort]').innerHTML=(this.value==='codex'?${JSON.stringify(LAUNCH_OPTIONS.codex.efforts)}:${JSON.stringify(LAUNCH_OPTIONS.claude.efforts)}).map(function(e){return '<option value='+e+'>'+e+'</option>'}).join('')"><option value="claude"${provider !== "codex" ? " selected" : ""}>Claude</option><option value="codex"${provider === "codex" ? " selected" : ""}>Codex</option></select></label>
     <label>Model <select name="model">${provider === "codex" ? `<option value="">default</option>` : opts(LAUNCH_OPTIONS.claude.models, l.model)}</select></label><label>or <input type="text" name="model_free" placeholder="codex model (free text)" style="width:150px"></label><label>Effort <select name="effort">${opts(LAUNCH_OPTIONS[provider === "codex" ? "codex" : "claude"].efforts, l.effort)}</select></label></div>
-    <div class="row"><label style="flex:1">Folder <input type="text" name="cwd" value="${esc(cwd || projectCwd(s))}" style="width:100%"></label></div>
-    <label>First prompt<textarea name="prompt">${esc(l.prompt || defaultNewPrompt(s.resolved || s.file))}</textarea></label>
-    <div class="row"><button class="b" type="submit">Start in a terminal</button><span class="meta">Claude: <span class="mono">claude --session-id &lt;new uuid&gt; …</span> (stamped on the plan at once). Codex: <span class="mono">codex -C &lt;folder&gt; …</span> (its thread id is matched by folder on the first poll).</span></div></form>`;
-  return isNew ? newForm + `<details style="margin-top:14px"><summary class="meta" style="cursor:pointer">Resume the existing session instead</summary>${resumeForm}</details>` : resumeForm + newForm;
+    <div class="row"><label style="flex:1">Folder <input type="text" name="cwd" value="${esc(cwd || projectCwd(s))}" style="flex:1"></label></div>
+    <label style="display:block">Prompt<textarea name="prompt">${esc(l.prompt || defaultNewPrompt(s.resolved || s.file))}</textarea></label>
+    <div class="row"><button class="b" type="submit">Start in a terminal</button><span class="meta">Claude: <span class="mono">claude --session-id &lt;new uuid&gt; …</span> (stamped on the plan at once). Codex: <span class="mono">codex -C &lt;folder&gt; …</span> (its thread is matched by folder on the first poll).</span></div></form>`;
+  return resumeForm + newForm;
 }
-function renderConnect(s, q, serverUp, layout) {
-  const isNew = q.get("new") === "1";
-  const body = `<div class="crumbs"><a href="/">All plans</a> › <a href="/session/${s.key}">${esc(s.title)}</a> › <b>${isNew ? "New session" : "Resume"}</b></div><h1>${esc(s.title)}</h1><p class="meta">${esc(shortPath(s.resolved || s.file))}</p>${agentBlock(s, { forms: false })}${launchForms(s, { isNew })}`;
-  return page(`${isNew ? "New session" : "Resume"} · ${s.title}`, `${s.project} · ${s.title}`, body, serverUp, { layout });
-}
-/** The Agent block: state, name, id, cwd, provider, source; Change effort for owned Claude terminals; Find sessions; earlier sessions. */
-function agentBlock(s, { forms = true, effortResult = "", scanResult = "" } = {}) {
+/** The Agent block: state, session (name · provider · model), folder, stamped; Change effort for owned Claude terminals. */
+function agentBlock(s, { effortResult = "", scanResult = "" } = {}) {
   const a = s.agent;
   const owned = a.state === "active" && a.terminal && a.provider === "claude";
-  const list = s.agents.filter((x) => x.id !== a.id);
-  return `<h2 id="agent">Agent <span class="meta" style="font-family:'Public Sans',system-ui;font-size:12.5px;font-weight:400">who is on this plan, from lavish-poll / lavish-meta stamps${a.source === "scan" ? " (this one from the transcript scan)" : ""}</span></h2>
-  <div class="kv"><span class="k">State</span><span>${a.state === "none" ? '<span class="ag none">not connected</span>' : `<span class="ag ${a.state}${a.source === "scan" ? " scan" : ""}">${a.state === "active" ? '<span class="dot"></span>' : ""}${esc(a.state)}${a.state === "active" ? ` · ${a.terminal ? "terminal " + esc(a.tmuxName) : esc(a.entrypointLabel)}${a.status ? ` · ${esc(a.status)}` : ""}` : ` · ${esc(ago(a.at))}`}</span>`}</span>
-  ${a.state !== "none" ? `<span class="k">Name</span><span>${glyph(a.provider)} <span class="mono">${esc(a.name)}</span> · ${esc(a.provider)}${a.guessed ? " · guessed (several live Codex threads in this folder)" : ""}</span><span class="k">Id</span><span class="mono">${esc(a.id)}</span><span class="k">Folder</span><span class="mono">${esc(a.cwd || "")}${a.cwd && !existsSync(a.cwd) ? ' <span class="st orphan">missing</span>' : ""}</span><span class="k">Stamped</span><span>${esc(a.source)} · ${fmt(a.at)}${a.state === "ended" ? ` · would resume as <span class="mono">${esc(a.tmuxName)}</span>` : ""}</span>` : ""}</div>
+  const model = modelName((s.reg.launch || {}).model);
+  return `<div class="kv"><span class="k">State</span><span>${a.state === "none" ? '<span class="ag none">not connected</span>' : `<span class="ag ${a.state}${a.source === "scan" ? " scan" : ""}">${a.state === "active" ? '<span class="dot"></span>' : ""}${esc(a.state)}${a.state === "active" ? ` · ${a.terminal ? "terminal " + esc(a.tmuxName) : esc(a.entrypointLabel)}${a.status ? ` · ${esc(a.status)}` : ""}` : ` · ${esc(ago(a.at))}`}</span>`}</span>
+  ${a.state !== "none" ? `<span class="k">Session</span><span>${glyph(a.provider)} <span class="mono" title="${esc(a.id)}">${esc(a.name)}</span> · ${esc(a.provider === "codex" ? "Codex" : "Claude")}${model ? ` · ${esc(model)}` : ""}${a.guessed ? " · guessed (several live Codex threads in this folder)" : ""}</span><span class="k">Folder</span><span class="mono">${esc(shortPath(a.cwd || ""))}${a.cwd && !existsSync(a.cwd) ? ' <span class="st orphan">missing</span>' : ""}</span><span class="k">Stamped</span><span>${esc(a.source)} · ${fmt(a.at)}${a.state === "ended" ? ` · would resume as <span class="mono">${esc(a.tmuxName)}</span>` : ""}</span>` : ""}</div>
   ${effortResult ? `<div class="notice">${esc(effortResult)}</div>` : ""}${scanResult ? `<div class="notice">${esc(scanResult)}</div>` : ""}
-  ${forms ? `<div class="row" style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin:6px 0 10px">
-    ${owned ? `<form class="inline" method="post" action="/effort/${s.key}"><label>Change effort <select name="level">${LAUNCH_OPTIONS.claude.efforts.filter((e) => e !== "default").map((e) => `<option value="${e}">${e}</option>`).join("")}</select></label> <button class="b q" type="submit" title="Types /effort <level> into the terminal ${esc(a.tmuxName)}, only while it is idle at its prompt, then shows the pane's reply">Type /effort into the terminal</button></form>` : a.state === "active" && a.provider === "claude" ? `<span class="meta">Change effort is only offered for a Claude session in a terminal this page or Manager Marcus started (this one is in ${esc(a.entrypointLabel)}).</span>` : ""}
-    <form class="inline" method="post" action="/scan/${s.key}"><button class="b q" type="submit" title="Look through this project's transcripts of the last 7 days for sessions that read or edited this plan (Read/Edit/Write targets only; a Bash mention does not count)">Find sessions</button></form>
-    ${a.state === "ended" || a.state === "none" ? `<a class="a" href="/connect/${s.key}">Resume / New session…</a>` : `<a class="a" href="/connect/${s.key}?new=1">New session…</a>`}</div>` : ""}
-  ${list.length ? `<p class="meta" style="margin:4px 0 0">Earlier sessions on this plan: ${list.map((x) => `<span class="ag ${x.source === "scan" ? "scan" : ""}" style="display:inline-flex;margin-right:10px" title="${esc(x.provider)} ${esc(x.id)} · ${esc(x.source)} · ${esc(fmt(x.at))}">${glyph(x.provider)}<span class="name">${esc(agentLabel(x))}</span> · ${esc(ago(x.at))}</span>`).join("")}</p>` : ""}`;
+  ${owned ? `<form class="inline" method="post" action="/effort/${s.key}" style="display:block;margin:0 0 10px"><label>Change effort <select name="level">${LAUNCH_OPTIONS.claude.efforts.filter((e) => e !== "default").map((e) => `<option value="${e}">${e}</option>`).join("")}</select></label> <button class="b q" type="submit" title="Types /effort <level> into the terminal ${esc(a.tmuxName)}, only while it is idle at its prompt, then shows the pane's reply">Type /effort into the terminal</button></form>` : ""}`;
+}
+/** Sessions table: every agent that has been on this plan (the current one first). */
+function sessionsTable(s) {
+  const list = [];
+  const seen = new Set();
+  for (const x of [s.reg.agent, ...s.agents]) { if (!x || !x.id || seen.has(x.id)) continue; seen.add(x.id); list.push(x); }
+  if (!list.length) return `<p class="empty">No session has polled this plan yet.</p>`;
+  const rows = list.map((x) => {
+    const live = s.agent.id === x.id ? s.agent : null;
+    const model = live && modelName((s.reg.launch || {}).model);
+    const where = live ? (live.state === "active" ? (live.terminal ? "terminal" : live.entrypointLabel || "editor") : "ended") : "ended";
+    const acts = live && live.state === "active" ? `<form class="inline" method="post" action="/open/${s.key}"><button class="a" type="submit">Open in Lavish</button></form>` : `<form class="inline" method="post" action="/connect/${s.key}?agent=${encodeURIComponent(x.id)}"><button class="a" type="submit" title="Resume this particular session in a terminal">Resume</button></form>`;
+    return `<tr><td class="sess">${glyph(x.provider)} <span class="ag ${x.source === "scan" ? "scan" : ""}" style="display:inline-flex" title="${esc(x.provider)} ${esc(x.id)} · ${esc(x.source || "poll")}"><span class="name">${esc(agentLabel(x))}</span></span>${live && live.state === "active" ? ' <span class="dot"></span>' : ""}</td><td>${model ? esc(model) : '<span class="num">–</span>'}</td><td>${esc(where)}</td><td class="num">${fmt(x.at)}</td><td class="num">–</td><td class="num">–</td><td>${acts}</td></tr>`;
+  }).join("");
+  return `<div class="tw"><table class="tl"><colgroup><col style="width:24%"><col style="width:11%"><col style="width:11%"><col style="width:14%"><col style="width:14%"><col style="width:10%"><col style="width:16%"></colgroup><thead><tr><th>Session</th><th>Model</th><th>Where</th><th title="the stamp's time until CS2 reads the transcript">Last seen</th><th>Last ended</th><th>Browsers</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 function renderSession(s, all, serverUp, q, layout) {
-  const groups = transcriptGroups(s).reverse();
-  const msgHtml = (i) => `<div class="msg ${i.role === "agent" ? "agent" : i.role === "system" ? "sys" : i.kind === "annotation" ? "ann" : ""}"><small>${i.role === "agent" ? "agent" : i.role === "system" ? "system" : "you"} · ${esc(i.kind || "")}${i.tag && i.kind === "annotation" ? ` on &lt;${esc(i.tag)}&gt;` : ""}${i.where ? ` · “${esc(i.where.slice(0, 80))}”` : ""} · ${fmt(i.at)}</small>${esc(i.text)}</div>`;
+  const groups = transcriptGroups(s);
+  // private comments join the conversation by time: each lands in the session group that was on the plan when it was written
+  const priv = s.notes.filter((n) => n.created).map((n) => ({ at: n.created, role: "private", kind: n.state || "private", text: n.body, where: n.anchor?.text || "" }));
+  for (const n of priv) { let g = groups[0]; for (const x of groups) if (String(x.first) <= String(n.at)) g = x; if (g) { g.items.push(n); g.items.sort((a, b) => String(a.at).localeCompare(String(b.at))); } }
+  groups.reverse();
+  const msgHtml = (i) => `<div class="msg ${i.role === "agent" ? "agent" : i.role === "system" ? "sys" : i.role === "private" ? "priv" : i.kind === "annotation" ? "ann" : ""}"><small>${i.role === "agent" ? "agent" : i.role === "system" ? "system" : i.role === "private" ? "private" : "you"} · ${esc(i.kind || "")}${i.tag && i.kind === "annotation" ? ` on &lt;${esc(i.tag)}&gt;` : ""}${i.where ? ` · “${esc(String(i.where).slice(0, 80))}”` : ""} · ${fmt(i.at)}</small>${esc(i.text)}</div>`;
   const msgs = groups.length ? groups.map((g, gi) => {
     const live = s.agent.id && g.id === s.agent.id ? s.agent : null;
     const resumeBtn = g.id && !(live && live.state === "active") && g.rec ? `<form class="inline" method="post" action="/connect/${s.key}?agent=${encodeURIComponent(g.id)}" style="margin-left:8px"><button class="a" type="submit" title="Resume this particular session in a terminal">Resume</button></form>` : "";
     return `<details class="tg"${gi === 0 ? " open" : ""}><summary>${g.id ? glyph(g.provider) : ""}<span class="who">${esc(g.name)}</span>${live ? `<span class="ag ${live.state}" style="font-size:11.5px">${live.state === "active" ? '<span class="dot"></span>' : ""}${esc(live.state)}</span>` : ""}${resumeBtn}<span class="when">${g.items.length} message${g.items.length === 1 ? "" : "s"} · ${fmtDay(g.first)}${g.last !== g.first ? ` → ${fmtDay(g.last)}` : ""}</span></summary><div class="body">${g.items.map(msgHtml).join("")}</div></details>`;
-  }).join("") : `<p class="empty">No transcript yet. Typed messages and agent replies appear here from state.json; annotations appear once lavish-poll has delivered a round.</p>`;
-  const related = s.related.map((r) => { const t = all.find((x) => x.resolved && (x.resolved.endsWith(r) || basename(x.resolved) === r)); return t ? `<a class="a" href="/session/${t.key}">${esc(t.title)}</a>` : esc(r); }).join("<br>");
+  }).join("") : (priv.length ? priv.map(msgHtml).join("") : `<p class="empty">No transcript yet. Typed messages and agent replies appear here from state.json; annotations appear once lavish-poll has delivered a round.</p>`);
+  const related = s.related.map((r) => { const t = all.find((x) => x.resolved && (x.resolved.endsWith(r) || basename(x.resolved) === r)); return t ? `<a class="a" href="/session/${t.key}">${esc(t.title)}</a>` : esc(r); }).join(" ");
   const restored = q.get("restored"), prRefreshed = q.get("prs"), notice = q.get("notice"), effortResult = q.get("effort") || "", scanResult = q.get("scan") || "";
-  const statusForm = `<form method="post" action="/status/${s.key}" style="display:grid;gap:6px">
-      <label>Plan status <select name="status" onchange="this.form.submit()"><option value="">— infer (${esc(s.plan.inferred ? s.plan.status : "auto")})</option>${STATUSES.map((x) => `<option value="${x}"${normalizeStatus(s.reg.status) === x ? " selected" : ""}>${x.replace("-", " ")}</option>`).join("")}</select>
-      &nbsp; Priority <select name="priority" onchange="this.form.submit()">${PRIORITIES.map((x) => `<option value="${x}"${s.plan.priority === x ? " selected" : ""}>${x}</option>`).join("")}</select></label>
-      <label>Add PR # <input type="number" name="pr" min="1" style="width:90px" placeholder="536"> <button class="b" type="submit">Save</button></label>
-      <label>Summary <input type="text" name="summary" value="${esc(s.reg.summary || "")}" placeholder="${esc(s.head.summary || "one line, shown on the home page")}" style="width:100%"></label>
-    </form>
-    <form method="post" action="/refresh-prs/${s.key}" style="margin-top:6px"><button class="b q" type="submit" title="Runs gh pr view for each PR">Refresh PR states</button>${prRefreshed ? ` <span class="meta">${esc(prRefreshed)}</span>` : ""}</form>
-    <form method="post" action="/move/${s.key}" style="margin-top:6px"><label>Folder <select name="fid" onchange="this.form.submit()"><option value="">— unfiled (${esc(s.project)})</option>${folderOptions(layout, s.folder)}</select></label></form>`;
-  const body = `<div class="crumbs"><a href="/">All plans</a>${s.folderPath.map((f) => ` › <a href="/?folder=${esc(f.id)}">${esc(f.name)}</a>`).join("") || ` › <a href="/?project=${encodeURIComponent(s.project)}">${esc(s.project)}</a>`} › <b>${esc(s.title)}</b></div>
-  <h1 style="display:flex;align-items:center;gap:10px">${monogram(s.project, { logo: s.logo, key: s.key, size: 32 })}${esc(s.title)}</h1><p class="meta">${esc(s.project)}${s.worktree ? ` · worktree ${esc(s.worktree)}` : ""} · session ${s.key}${s.plan.summary ? `<br>${esc(s.plan.summary)}` : ""}</p>
+  const p = s.plan;
+  const statusForm = `<form method="post" action="/status/${s.key}" class="xform" style="gap:6px"><div class="row"><label>Plan status <select name="status" onchange="this.form.submit()"><option value="">— infer (${esc(p.inferred ? (STATUS_WORDS[p.status] || [p.status])[0] : "auto")})</option>${STATUSES.map((x) => `<option value="${x}"${normalizeStatus(s.reg.status) === x ? " selected" : ""}>${(STATUS_WORDS[x] || [x])[0]}</option>`).join("")}</select></label>
+      <label>Priority <select name="priority" onchange="this.form.submit()">${PRIORITIES.map((x) => `<option value="${x}"${p.priority === x ? " selected" : ""}>${x}</option>`).join("")}</select></label>
+      <label>PR # <input type="number" name="pr" min="1" style="width:80px" placeholder="536"></label><button class="b q" type="submit">Save</button></div>
+      <label style="display:flex">Summary <input type="text" name="summary" value="${esc(s.reg.summary || "")}" placeholder="${esc(s.head.summary || "one line, shown on the home page")}" style="flex:1"></label></form>
+    <p class="meta" style="margin:8px 0 0"><form class="inline" method="post" action="/refresh-prs/${s.key}"><button class="a" type="submit" title="Runs gh pr view for each PR">Refresh PR states</button></form>${prRefreshed ? `<span>${esc(prRefreshed)}</span>` : ""} ${s.exists ? `<a class="a" href="/view/${s.key}/" target="_blank" rel="noopener">View</a><form class="inline" method="post" action="/open/${s.key}"><button class="a" type="submit">${s.status === "ended" ? "Reopen in Lavish" : "Open in Lavish"}</button></form>` : ""}${s.exists && s.status !== "ended" ? `<form class="inline" method="post" action="/end/${s.key}" onsubmit="return confirm('End this Lavish session?')"><button class="a" type="submit">End session</button></form>` : ""}<form class="inline" method="post" action="/scan/${s.key}"><button class="a" type="submit" title="Look through this project's transcripts of the last 7 days for sessions that read or edited this plan">Find sessions</button></form></p>`;
+  const steps = [...STAGES].map((st, i) => `<span class="${p.stage === st ? "now" + (p.stageInferred ? " inferred" : "") : i < p.stageIndex ? "past" : ""}">${STAGE_LABELS[st]}</span>`).join("");
+  const latest = p.progress.latest;
+  const sidebar = renderSidebar(all, layout, { current: s.key, counts: folderCounts(layout, all) });
+  const body = `<div class="crumbs"><a href="/">All plans</a> › <a href="/?project=${encodeURIComponent(s.project)}">${esc(s.project)}</a>${s.folderPath.map((f) => ` › <a href="/?folder=${esc(f.id)}">${esc(f.name)}</a>`).join("")} › <b>${esc(s.title)}</b></div>
+  <h1>${esc(s.title)} <span class="vn" style="font-size:13px">v${s.versionCount || 0}</span>${!s.exists ? ' <span class="st orphan">file missing</span>' : ""}</h1>
+  <p class="meta" style="margin:0">${p.summary ? esc(p.summary) : `<span>${esc(s.project)}${s.worktree ? ` · worktree ${esc(s.worktree)}` : ""}</span>`}${p.summary && s.worktree ? ` · worktree ${esc(s.worktree)}` : ""}${related ? ` · <b>Related</b> ${related}` : ""}</p>
+  <div class="stageline"><div class="stage-steps${p.stage === "parked" ? " parked" : ""}">${steps}</div><span>· ${esc(p.subLabel)}${p.stageNote ? ` · ${esc(p.stageNote)}` : ""}${latest ? ` · latest: ${esc(latest.text)} · ${esc(latest.session?.label || "")} · ${fmtDay(latest.at)}` : ""}</span></div>
   ${restored ? `<div class="notice">Restored version ${esc(restored)} onto disk. Your Lavish tab will offer a reload. The agent does not learn about this by itself, so tell it in the conversation panel.</div>` : ""}
   ${notice ? `<div class="notice ${/^(Could not|Folder missing|.* not found)/.test(notice) ? "bad" : ""}">${esc(notice)}</div>` : ""}
-  ${agentBlock(s, { effortResult, scanResult })}
-  <div class="detail"><div><h2 style="margin-top:14px">Conversation <span class="meta" style="font-family:'Public Sans',system-ui;font-size:12.5px;font-weight:400">grouped per agent session, newest first</span></h2>${msgs}</div><div class="side2">
-    <p><b>File</b><br><span class="mono">${esc(s.resolved || s.file)}</span>${!s.exists ? ' <span class="st orphan">missing</span>' : ""}</p>
-    <p><b>Lavish session</b> ${esc(s.status)}${s.endedBy ? ` by ${esc(s.endedBy)}` : ""} · <b>updated</b> ${fmt(s.updated)}<br><b>Review</b> ${s.agentMsgs} agent replies · ${s.userSent} items sent · ${s.privateNotes} private comments</p>
-    <p><b>Stage</b> <span class="stg ${esc(s.plan.stage)}${s.plan.stageInferred ? " inferred" : ""}">${esc(s.plan.stageLabel)}</span> ${esc(s.plan.subLabel)}${s.plan.session?.label ? ` · <b>working session</b> ${esc(s.plan.session.label)}` : ""}<br><b>Plan</b> ${planChip(s.plan)} &nbsp; <b>PRs</b> ${prChips(s.plan)}</p>
-    ${statusForm}
-    ${related ? `<p style="margin-top:12px"><b>Related</b><br>${related}</p>` : ""}
-    <p style="margin-top:12px">${s.exists ? `<a class="a" href="/view/${s.key}/" target="_blank" rel="noopener">View</a><form class="inline" method="post" action="/open/${s.key}"><button class="a" type="submit">${s.status === "ended" ? "Reopen in Lavish" : "Open in Lavish"}</button></form>` : ""}<a class="a" href="/session/${s.key}.md">Export transcript (.md)</a>${s.exists && s.status !== "ended" ? `<form class="inline" method="post" action="/end/${s.key}" onsubmit="return confirm('End this Lavish session?')"><button class="a" type="submit">End session</button></form>` : ""}</p>
-  </div></div>
-  ${launchForms(s)}
-  ${renderProgress(s)}
+  <div class="twoCol"><div class="box" id="agent"><h3>Agent <span class="meta">who is on this plan, from lavish-poll / lavish-meta stamps${s.agent.source === "scan" ? " (this one from the transcript scan)" : ""}</span></h3>${agentBlock(s, { effortResult, scanResult })}${statusForm}</div>
+  <div class="box" id="launch"><h3>Resume or start a new session</h3>${launchForms(s)}</div></div>
+  <h2 id="sessions">Sessions <span class="meta">every agent that has been on this plan</span></h2>${sessionsTable(s)}
+  <h2 id="history">History <span class="meta">the plan's main events, newest first</span></h2>${renderProgress(s)}
   ${renderVersions(s)}
-  ${renderCommits(s)}
-  ${renderNotes(s)}
-  ${renderUnsent(s)}
-  ${renderExport(s)}`;
-  return page(s.title, `${s.project} · ${s.title}`, body, serverUp, { layout });
+  ${renderCommits(s)}${renderUnsent(s)}${renderExport(s)}
+  <h2 id="conversation">Conversation <span class="meta">grouped per agent session, newest open; your private comments are in place by time and never sent</span></h2>${msgs}`;
+  return page(s.title, `${s.project} · ${s.title}`, body, serverUp, { sidebar, layout, key: s.key });
 }
+
 function currentVersionState(s) {
   if (!s.exists || !s.versions.length) return { n: null, dirty: false };
   const latest = s.versions[s.versions.length - 1];
@@ -624,27 +788,29 @@ function commentsPerVersion(s) {
   }
   return buckets;
 }
+/** "What changed" for a version: its round label when the poll saved it, else the reason in words (no line counts). */
+function versionWhy(v) {
+  if (v.label) return v.label;
+  return { "agent-reply": "round closed: the agent replied", poll: "agent polled", baseline: "first snapshot", "pre-restore": "before a restore", restore: "restored version", chrome: "saved from the Lavish page", scan: "edited between rounds" }[v.reason] || "file changed on disk";
+}
 function renderVersions(s) {
   const cur = currentVersionState(s);
   const buckets = commentsPerVersion(s);
-  let html = `<h2 id="versions">Versions <span class="meta" style="font-family:'Public Sans',system-ui;font-size:12.5px;font-weight:400">${s.versions.length} saved${cur.n ? ` · the file on disk ${cur.dirty ? `has changed since v${cur.n} (snapshotted within ${SCAN_MS / 1000}s)` : `is v${cur.n}`}` : ""}</span></h2>`;
+  let html = `<h2 id="versions">Versions <span class="meta">${s.versions.length} saved${cur.n ? ` · the file on disk ${cur.dirty ? `has changed since v${cur.n} (snapshotted within ${SCAN_MS / 1000}s)` : `is v${cur.n}`}` : ""}</span></h2>`;
   if (!s.versions.length) return html + `<p class="empty">No versions yet. A copy is saved whenever the file changes (checked every ${SCAN_MS / 1000}s) and at every lavish-poll round.</p>`;
-  html += `<div class="tw"><table><thead><tr><th>Version</th><th>Saved</th><th>Why</th><th>Round</th><th title="comments you sent and private notes you wrote while this version was on screen">Comments</th><th>Text lines</th><th>Size</th><th>Actions</th></tr></thead><tbody>`;
+  html += `<div class="tw vt"><table><colgroup><col style="width:11%"><col style="width:13%"><col style="width:34%"><col style="width:20%"><col style="width:22%"></colgroup><thead><tr><th>Version</th><th>Saved</th><th>What changed</th><th title="comments you sent and private notes you wrote while this version was on screen">Comments</th><th>Actions</th></tr></thead><tbody>`;
   const vs = s.versions.slice().reverse();
   for (const v of vs) {
     const bucket = buckets.get(v.n) || [];
     const nSent = bucket.filter((i) => i.kind !== "private" && i.kind !== "resolved").length, nPriv = bucket.length - nSent;
-    const commentsCell = bucket.length ? `<details class="vcomments"><summary>${nSent} sent · ${nPriv} private</summary>${bucket.map((i) => `<div class="note ${esc(i.kind === "private" || i.kind === "resolved" ? i.kind : "sent")}"><div class="anc">${esc(i.kind)}${i.where ? ` · “${esc(String(i.where).slice(0, 80))}”` : ""} · ${fmt(i.at)}</div>${esc(i.text)}${(i.files || []).length ? `<div class="thumbs">${i.files.map((f) => `<a href="${esc(f.url)}" target="_blank" rel="noopener"><img src="${esc(f.url)}" alt="${esc(f.name)}"></a>`).join("")}</div>` : ""}</div>`).join("")}</details>` : `<span class="num">–</span>`;
+    const commentsCell = bucket.length ? `<details class="vcomments"><summary>${nSent} sent${nPriv ? ` · ${nPriv} private` : ""}</summary>${bucket.map((i) => `<div class="note ${esc(i.kind === "private" || i.kind === "resolved" ? i.kind : "sent")}"><div class="anc">${esc(i.kind)}${i.where ? ` · “${esc(String(i.where).slice(0, 80))}”` : ""} · ${fmt(i.at)}</div>${esc(i.text)}${(i.files || []).length ? `<div class="thumbs">${i.files.map((f) => `<a href="${esc(f.url)}" target="_blank" rel="noopener"><img src="${esc(f.url)}" alt="${esc(f.name)}"></a>`).join("")}</div>` : ""}</div>`).join("")}</details>` : `<span class="num">–</span>`;
     const prev = s.versions.find((x) => x.n === v.n - 1) || s.versions.filter((x) => x.n < v.n).pop();
-    const delta = prev ? v.lines - prev.lines : 0;
-    const why = v.label ? esc(v.label) : v.reason === "agent-reply" ? "agent replied (round closed)" : v.reason === "poll" ? "agent polled" : v.reason === "baseline" ? "first snapshot" : v.reason === "pre-restore" ? "before a restore" : v.reason === "restore" ? "restored version" : "file changed on disk";
     const acts = [
       `<a class="a" href="/version/${s.key}/${v.n}/" target="_blank" rel="noopener">View</a>`,
-      prev ? `<a class="a" href="/diff/${s.key}/${prev.n}/${v.n}">Diff → previous</a>` : "",
-      s.exists ? `<a class="a" href="/diff/${s.key}/${v.n}/current">Diff → current</a>` : "",
-      s.exists && (cur.dirty || v.n !== cur.n) ? `<form class="inline" method="post" action="/restore/${s.key}/${v.n}" onsubmit="return confirm('Put version ${v.n} back onto disk? The current file is snapshotted first, so nothing is lost.')"><button class="a" type="submit">Restore</button></form>` : "",
+      prev ? `<a class="a" href="/diff/${s.key}/${prev.n}/${v.n}" title="What changed against v${prev.n}">Diff</a>` : "",
+      s.exists && (cur.dirty || v.n !== cur.n) ? `<form class="inline" method="post" action="/restore/${s.key}/${v.n}" onsubmit="return confirm('Continue from version ${v.n}? The current file is snapshotted first, then v${v.n} is written over it, so nothing is lost.')"><button class="a" type="submit" title="Today's Restore: snapshot the current file, then put this version back on disk">Continue from</button></form>` : "",
     ].join("");
-    html += `<tr id="v${v.n}"><td><b>v${v.n}</b>${v.n === cur.n && !cur.dirty ? ' <span class="st open">current</span>' : ""}</td><td class="num">${fmt(v.at)}</td><td>${why}</td><td class="num">${v.round ?? "–"}</td><td>${commentsCell}</td><td class="num">${v.lines}${prev ? ` <span style="color:${delta > 0 ? "var(--good)" : delta < 0 ? "var(--bad)" : "var(--ink3)"}">(${delta > 0 ? "+" : ""}${delta})</span>` : ""}</td><td class="num">${kb(v.bytes)}</td><td>${acts}</td></tr>`;
+    html += `<tr id="v${v.n}"><td><b>v${v.n}</b>${v.n === cur.n && !cur.dirty ? ' <span class="st open">current</span>' : ""}${v.round != null ? ` <span class="num" title="review round">r${v.round}</span>` : ""}</td><td class="num">${fmt(v.at)}</td><td>${esc(versionWhy(v))}</td><td>${commentsCell}</td><td>${acts}</td></tr>`;
   }
   return html + `</tbody></table></div>`;
 }
@@ -654,18 +820,11 @@ function renderCommits(s) {
   if (!info.root) return "";
   const log = gitLogForFile(s.resolved, 15);
   const st = gitStatusForFile(s.resolved);
-  let html = `<h2>Commits <span class="meta" style="font-family:'Public Sans',system-ui;font-size:12.5px;font-weight:400">${esc(info.slug || basename(info.root))} · working copy ${esc(st)}</span></h2>`;
-  if (!log.length) return html + `<p class="empty">Not committed yet.</p>`;
-  html += `<div class="tw"><table><thead><tr><th>Commit</th><th>When</th><th>Subject</th></tr></thead><tbody>`;
+  let html = `<details class="fold"><summary>Commits <span class="meta">${esc(info.slug || basename(info.root))} · working copy ${esc(st)} · ${log.length ? `${log.length} shown` : "not committed yet"}</span></summary><div class="in">`;
+  if (!log.length) return html + `<p class="empty" style="padding:8px 0">Not committed yet.</p></div></details>`;
+  html += `<div class="tw"><table class="tl"><thead><tr><th>Commit</th><th>When</th><th>Subject</th></tr></thead><tbody>`;
   for (const c of log) html += `<tr><td class="mono">${info.webBase ? `<a class="a" href="${esc(info.webBase)}/commit/${esc(c.hash)}" target="_blank" rel="noopener">${esc(c.hash)}</a>` : esc(c.hash)}</td><td class="num">${fmt(c.date)}</td><td>${esc(c.subject)}</td></tr>`;
-  return html + `</tbody></table></div>`;
-}
-function renderNotes(s) {
-  const notes = s.notes.slice().sort((a, b) => String(a.created).localeCompare(String(b.created)));
-  let html = `<h2>Private comments <span class="meta" style="font-family:'Public Sans',system-ui;font-size:12.5px;font-weight:400">${notes.length} · written in the Comments rail · never sent to the agent</span></h2>`;
-  if (!notes.length) return html + `<p class="empty">None. In Lavish, click or select something in the artifact and choose “Keep private”.</p>`;
-  for (const n of notes) html += `<div class="note ${esc(n.state || "private")}"><div class="anc">${n.anchor?.text ? `“${esc(String(n.anchor.text).slice(0, 120))}”` : "general"}${n.anchor?.tag ? ` · &lt;${esc(n.anchor.tag)}&gt;` : ""} · ${esc(n.state || "private")}${n.state === "sent" && n.sentAt ? ` ${fmt(n.sentAt)}` : ""} · ${fmt(n.updated || n.created)}</div>${esc(n.body)}${(n.attachments || []).length ? `<div class="thumbs">${n.attachments.map((f) => `<a href="${esc(f.url)}" target="_blank" rel="noopener"><img src="${esc(f.url)}" alt="${esc(f.name)}"></a>`).join("")}</div>` : ""}${(n.replies || []).map((r) => `<div class="reply">↳ ${esc(r.text)}</div>`).join("")}</div>`;
-  return html;
+  return html + `</tbody></table></div></div></details>`;
 }
 function transcriptMd(s) {
   const lines = [`# ${s.title}`, "", `File: ${s.resolved || s.file}`, `Session: ${s.key} · status ${s.status}${s.endedBy ? ` (ended by ${s.endedBy})` : ""}`, `Plan: ${s.plan.status}${s.plan.inferred ? " (inferred)" : ""}${s.plan.prs.length ? ` · PRs ${s.plan.prs.map((p) => `#${p.n}${p.state ? ` (${p.state.toLowerCase()})` : ""}`).join(", ")}` : ""}`, ""];
@@ -738,37 +897,33 @@ function renderDiff(s, a, b, serverUp) {
 
 /* ── progress, unsent and export sections of the session page ─────────── */
 function renderProgress(s) {
-  const p = s.plan;
-  const steps = [...STAGES].map((st, i) => `<span class="${p.stage === st ? "now" + (p.stageInferred ? " inferred" : "") : i < p.stageIndex ? "past" : ""}">${STAGE_LABELS[st]}</span>`).join("");
   const sessions = recentSessions(s.reg);
   const entries = (s.reg.progress || []).slice().reverse();
-  let html = `<h2 id="progress">Progress <span class="meta" style="font-family:'Public Sans',system-ui;font-size:12.5px;font-weight:400">${esc(p.stageLabel)} · ${esc(p.subLabel)}${p.progress.pct != null ? ` · ${p.progress.pct}% done` : ""}${p.stageNote ? ` · ${esc(p.stageNote)}` : ""}</span></h2>
-  <div class="stage-steps${p.stage === "parked" ? " parked" : ""}">${steps}</div>
-  <p class="meta">${sessions.length ? `Working session${sessions.length > 1 ? "s" : ""} (last 7 days): ${sessions.map((x) => `<b>${esc(x.label)}</b>${x.cwd ? ` <span class="mono">${esc(shortPath(x.cwd))}</span>` : ""} · ${fmt(x.at)}`).join(" · ")}` : "No session has posted progress yet. The agent does it with <span class=\"mono\">lavish-meta &lt;plan&gt; --progress \"…\"</span>; status and PR changes log themselves."}</p>
-  <form method="post" action="/status/${s.key}" class="xform"><div class="row"><label style="flex:1 1 auto;display:flex;gap:6px;align-items:center">Add a progress note <input type="text" name="progress" placeholder="what happened, e.g. PR3 opened (2 of 5)" style="flex:1 1 auto;font:inherit;font-size:12.5px;padding:3px 6px;border:1px solid #d5d2cb;border-radius:6px"></label><label>% <input type="number" name="pct" min="0" max="100" style="width:64px;font:inherit;font-size:12.5px;padding:3px 6px;border:1px solid #d5d2cb;border-radius:6px"></label><button class="b" type="submit" style="font:inherit;font-size:12px;padding:3px 9px;border:1px solid var(--acc);border-radius:6px;background:var(--acc);color:#fff;cursor:pointer">Save</button></div></form>`;
-  if (!entries.length) return html;
-  html += `<table class="tl"><thead><tr><th>When</th><th>Session</th><th>Event</th></tr></thead><tbody>`;
-  for (const e of entries) html += `<tr><td class="num">${fmt(e.at)}</td><td class="sess">${esc(e.session?.label || "")}</td><td>${e.kind === "status" ? "🔄 " : e.kind === "pr" ? "🔗 " : e.kind === "verdict" ? "✅ " : ""}${esc(e.text)}${e.pct != null ? ` <span class="num">· ${e.pct}%</span>` : ""}</td></tr>`;
-  return html + `</tbody></table>`;
+  const word = (e) => { if (e.kind === "status") { const m = /status (.*) → (.*)/.exec(e.text || ""); const w = (x) => (STATUS_WORDS[x] || [x.replace(/-/g, " ")])[0]; return m ? `Plan status · ${w(m[1].trim())} → ${w(m[2].trim())}` : `Plan status · ${e.text}`; } if (e.kind === "pr") return `Build · ${e.text}`; if (e.kind === "verdict") return `Review · ${e.text}`; return e.text; };
+  let html = `<form method="post" action="/status/${s.key}" class="xform" style="margin:0 0 10px"><div class="row"><label style="flex:1 1 320px">Add a note <input type="text" name="progress" placeholder="what happened, e.g. PR3 opened (2 of 5)" style="flex:1"></label><label>% <input type="number" name="pct" min="0" max="100" style="width:64px"></label><button class="b q" type="submit">Save</button>${sessions.length ? `<span class="meta">working session${sessions.length > 1 ? "s" : ""} (7 days): ${sessions.map((x) => `<b>${esc(x.label)}</b> · ${fmt(x.at)}`).join(" · ")}</span>` : `<span class="meta">The agent writes here with <span class="mono">lavish-meta &lt;plan&gt; --progress "…"</span>; status and PR changes log themselves.</span>`}</div></form>`;
+  if (!entries.length) return html + `<p class="empty" style="padding:6px 0 12px">No events yet.</p>`;
+  html += `<div class="tw"><table class="tl"><colgroup><col style="width:14%"><col style="width:62%"><col style="width:24%"></colgroup><thead><tr><th>When</th><th>Event</th><th>By</th></tr></thead><tbody>`;
+  for (const e of entries) html += `<tr><td class="num">${fmt(e.at)}</td><td title="${esc(e.kind || "note")} · from the registry log">${esc(word(e))}${e.pct != null ? ` <span class="num">· ${e.pct}%</span>` : ""}</td><td class="sess">${esc(e.session?.label || "")}</td></tr>`;
+  return html + `</tbody></table></div>`;
 }
 function renderUnsent(s) {
   const items = s.unsent.items.filter((p) => !(p.tag === "message" && !p.selector) && p.tag !== "verdict");
   const draft = s.unsent.draft?.card?.text ? s.unsent.draft.card : null;
   if (!items.length && !draft) return "";
-  let html = `<h2>Unsent comments <span class="meta" style="font-family:'Public Sans',system-ui;font-size:12.5px;font-weight:400">${items.length} queued in the Comments rail, not sent yet${draft ? " · plus an unfinished annotation card" : ""} · they reappear when the page is reopened</span></h2>`;
+  let html = `<details class="fold" open><summary>Unsent comments <span class="meta">${items.length} queued in the Comments rail, not sent yet${draft ? " · plus an unfinished annotation card" : ""} · they reappear when the page is reopened</span></summary><div class="in">`;
   for (const p of items) html += `<div class="note"><div class="anc">${p.text ? `“${esc(String(p.text).slice(0, 120))}”` : "general"}${p.tag ? ` · &lt;${esc(p.tag)}&gt;` : ""} · queued</div>${esc(p.prompt || "")}${(p.attachments || []).length ? `<div class="thumbs">${p.attachments.map((a) => { const c = s.unsent.files?.[a.id]; const src = c?.url || `http://127.0.0.1:${process.env.LAVISH_AXI_PORT || 4387}/api/${s.key}/attachments/${a.id}`; return `<a href="${esc(src)}" target="_blank" rel="noopener"><img src="${esc(src)}" alt="${esc(a.name || "image")}"></a>`; }).join("")}</div>` : ""}</div>`;
   if (draft) html += `<div class="note"><div class="anc">annotation card on <span class="mono">${esc(draft.selector || "")}</span> · draft</div>${esc(draft.text)}</div>`;
-  return html;
+  return html + `</div></details>`;
 }
 function renderExport(s) {
   if (!s.exists) return "";
   const chk = (v, label) => `<label><input type="checkbox" name="include" value="${v}"> ${label}</label>`;
-  return `<h2 id="export">Export <span class="meta" style="font-family:'Public Sans',system-ui;font-size:12.5px;font-weight:400">the plan alone by default; tick what to append, or untick the plan for the review material only</span></h2>
-  <form class="xform" method="get" action="/export/${s.key}" target="_blank" onsubmit="this.include.value=[...this.querySelectorAll('input[name=include]:checked')].map(c=>c.value).join(',')">
+  return `<details class="fold" id="export"><summary>Export <span class="meta">the plan alone by default; tick what to append, or untick the plan for the review material only</span></summary><div class="in">
+  <form class="xform box" method="get" action="/export/${s.key}" target="_blank" onsubmit="this.include.value=[...this.querySelectorAll('input[name=include]:checked')].map(c=>c.value).join(',')">
     <div class="row"><span>Format</span><label><input type="radio" name="format" value="md" checked> Markdown</label><label><input type="radio" name="format" value="html"> HTML (self-contained)</label><label><input type="radio" name="format" value="pdf"> PDF</label></div>
     <div class="row"><span>Content</span><label><input type="checkbox" name="planbox" checked onchange="this.form.plan.value=this.checked?'1':'0'"> the plan</label>${chk("chat", "agent conversation")}${chk("comments", "comments sent")}${chk("notes", "private notes")}<input type="hidden" name="include" value=""><input type="hidden" name="plan" value="1"></div>
-    <div class="row"><button class="b" type="submit" style="font:inherit;font-size:12px;padding:4px 10px;border:1px solid var(--acc);border-radius:6px;background:var(--acc);color:#fff;cursor:pointer">Download</button><a class="a" href="/export/${s.key}?format=html&inline=1" target="_blank">Preview HTML</a><span class="meta">PDF renders with the headless Chromium on this machine; Markdown from here uses the page's own converter run headlessly (open the plan in Lavish and export there for the fastest path).</span></div>
-  </form>`;
+    <div class="row"><button class="b" type="submit">Download</button><a class="a" href="/export/${s.key}?format=html&inline=1" target="_blank">Preview HTML</a><span class="meta">PDF renders with the headless Chromium on this machine; Markdown from here uses the page's own converter run headlessly (open the plan in Lavish and export there for the fastest path).</span></div>
+  </form></div></details>`;
 }
 
 /* ── export: the plan as html / pdf / md, plus optional appendices ─────── */
@@ -1073,7 +1228,7 @@ http.createServer(async (req, res) => {
     }
     if ((m = /^\/connect\/([0-9a-f]{16})$/.exec(path))) {
       const s = sessions.find((x) => x.key === m[1]); if (!s || !s.exists) return send(res, 404, "text/plain", "no such session or file missing");
-      if (req.method === "GET") return send(res, 200, "text/html; charset=utf-8", renderConnect(s, url.searchParams, serverUp, layout));
+      if (req.method === "GET") return redirect(res, `/session/${s.key}#launch`);
       if (req.method !== "POST") return send(res, 405, "text/plain", "GET or POST");
       const body = parseBody(await readBody(req), req.headers["content-type"]);
       const isNew = url.searchParams.get("new") === "1";
@@ -1086,7 +1241,7 @@ http.createServer(async (req, res) => {
       await refreshLive(true);
       if (isNew) {
         const r = await startNewAgent({ provider, cwd: String(body.cwd || projectCwd(s)), planPath: s.resolved, planKey: s.key, model, effort, prompt: body.prompt }, { live: liveCache });
-        if (!r.ok) return send(res, 422, "text/html; charset=utf-8", errorPage("Could not start a new session", r.error, { back: `/connect/${s.key}?new=1` }, serverUp));
+        if (!r.ok) return send(res, 422, "text/html; charset=utf-8", errorPage("Could not start a new session", r.error, { back: `/session/${s.key}#launch` }, serverUp));
         if (r.agent) { try { updateRegistry(s.key, { file: s.resolved, agent: r.agent }); } catch {} }
         const note = `Started ${r.tmuxName} in Terminal.app${r.terminalError ? ` (the window did not open: ${r.terminalError}; attach with: tmux attach -t '=${r.tmuxName}')` : ""}. Its first prompt opens this plan in Lavish and polls it${r.provider === "codex" ? "; the Codex thread is matched by folder on that first poll" : ""}.`;
         return redirect(res, `${back}?notice=${encodeURIComponent(note)}#agent`);
@@ -1096,7 +1251,7 @@ http.createServer(async (req, res) => {
       const rec = wanted ? (s.agents.find((a) => a.id === wanted) || (s.reg.agent && s.reg.agent.id === wanted ? s.reg.agent : null)) : s.reg.agent;
       if (wanted && !rec) return send(res, 404, "text/html; charset=utf-8", errorPage("Unknown session", `No session ${wanted} is recorded on this plan.`, { back }, serverUp));
       const r = await resumeAgent({ agent: rec }, s.key, { model, effort }, { live: liveCache, tmuxNames: liveCache.tmux });
-      if (!r.ok) return send(res, 422, "text/html; charset=utf-8", errorPage("Could not resume", r.error, { back: `/connect/${s.key}`, extra: `<p><a class="a" href="/connect/${s.key}?new=1">Start a New session instead</a></p>` }, serverUp));
+      if (!r.ok) return send(res, 422, "text/html; charset=utf-8", errorPage("Could not resume", r.error, { back: `/session/${s.key}#launch`, extra: `<p><a class="a" href="/session/${s.key}#launch">Start a New session instead</a></p>` }, serverUp));
       const lv = openLavish(s);
       if (lv.error) return send(res, 500, "text/html; charset=utf-8", errorPage("Terminal ready, Lavish did not open", `${r.action === "resume" ? `Resumed in ${r.tmuxName}. ` : ""}${lv.error}`, { back }, serverUp));
       if (r.action === "lavish" || r.terminalError || r.note) {

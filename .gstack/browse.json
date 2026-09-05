@@ -1,0 +1,9 @@
+{
+  "pid": 58895,
+  "port": 18493,
+  "token": "ec5695dd-b5c2-45f4-90b5-7a3040cdeb3f",
+  "startedAt": "2026-09-05T23:11:56.938Z",
+  "serverPath": "/Users/marcuschen/.claude/skills/gstack/browse/src/server.ts",
+  "mode": "launched",
+  "configHash": "303a7eeccc03078b"
+}
