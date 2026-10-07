@@ -14,11 +14,11 @@ import { randomUUID } from "node:crypto";
 import os from "node:os";
 import { readJson, writeJsonAtomic, stateDir, claudeSessionsDir, codexHome } from "./lavish-lib.mjs";
 
-export const TMUX_BIN = "/usr/local/bin/tmux";
+export const TMUX_BIN = process.env.LAVISH_TMUX_BIN || "/usr/local/bin/tmux"; // fixed paths, not PATH lookups: the home is a server and runs only the binaries it was told about (install.sh sets these in the plist)
 /** LAVISH_OSASCRIPT_BIN points a copy of the tools at a stub, so a check of the home's own path opens no Terminal window. */
 export const OSASCRIPT_BIN = process.env.LAVISH_OSASCRIPT_BIN || "/usr/bin/osascript";
-export const CLAUDE_BIN = join(os.homedir(), ".local/bin/claude");
-export const CODEX_BIN = join(os.homedir(), ".local/bin/codex");
+export const CLAUDE_BIN = process.env.LAVISH_CLAUDE_BIN || join(os.homedir(), ".local/bin/claude"); // a fixed path on purpose: the home never runs whatever "claude" is first on PATH
+export const CODEX_BIN = process.env.LAVISH_CODEX_BIN || join(os.homedir(), ".local/bin/codex");
 export const TMUX_PANE_COLS = 160, TMUX_PANE_ROWS = 48, TMUX_TIMEOUT_MS = 8000, TMUX_ENTER_DELAY_MS = 250;
 /** The static table Manager Marcus also carries (server/src/constants.ts); the live lists come from ~/.lavish-axi/models.json (D7). */
 export const LAUNCH_OPTIONS = {

@@ -1,0 +1,147 @@
+<!-- review:begin -->
+<section class="blk rv" id="review-checklist"><details open data-sec="Review checklist">
+<summary class="h"><span class="title">Review checklist</span><span class="sum">3 checks in 1 group · 0 verified · 3 need you</span><span class="badges"><span>review</span></span></summary>
+<style>
+  /* Review checklist (review-changes skill). Self-contained: template variables with fallbacks, so the
+     section renders the same inside a plan-template page and inside an older plan page. */
+  .rv { font-family: "Avenir Next", "Helvetica Neue", "Segoe UI", system-ui, sans-serif; font-size: 15px; line-height: 1.5; }
+  .rv .rv-intro { color: var(--ink-3, #7a7772); font-size: 13.5px; margin: 4px 0 14px; }
+  .rv-group { border: 1px solid var(--hairline, #e6e3dd); border-radius: 8px; padding: 14px 16px 12px; margin: 0 0 16px; background: #fff; }
+  .rv-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 14px; align-items: baseline; padding-bottom: 10px; border-bottom: 1px solid var(--hairline, #e6e3dd); }
+  .rv-head .rv-title { font-size: 17px; font-weight: 600; }
+  .rv-head .rv-title a { font-weight: 400; font-size: 13.5px; margin-left: 8px; }
+  .rv-head .rv-facts { grid-column: 1; color: var(--ink-3, #7a7772); font-size: 12.5px; }
+  .rv-head .rv-facts code { font-size: 12px; }
+  .rv-head .rv-counter { grid-column: 2; grid-row: 1 / span 2; text-align: right; font-size: 12.5px; color: var(--ink-2, #4a4845); white-space: nowrap; }
+  .rv-grade { display: inline-block; margin-left: 8px; padding: 2px 9px; border-radius: 999px; font-weight: 600; background: #ecebe6; color: var(--ink-3, #7a7772); }
+  .rv-grade.a { background: var(--ok-soft, #e3f0e6); color: var(--ok, #2f7d4f); } .rv-grade.b { background: var(--accent-soft, #e4ecf4); color: var(--accent, #1f4e79); }
+  .rv-grade.c { background: var(--warn-soft, #f6efdc); color: var(--warn, #8a6d1f); } .rv-grade.d { background: var(--crit-soft, #f5e4e0); color: var(--crit, #9b3b2e); }
+  .rv-rows { list-style: none; margin: 0; padding: 0; }
+  .rv-row { display: grid; grid-template-columns: 32px 74px minmax(0, 1fr) auto; gap: 0 10px; padding: 10px 0; border-bottom: 1px dashed var(--hairline, #e6e3dd); align-items: start; }
+  .rv-row:last-child { border-bottom: 0; }
+  .rv-id { font-weight: 600; color: var(--accent, #1f4e79); font-variant-numeric: tabular-nums; padding-top: 2px; }
+  .rv-works { display: inline-flex; gap: 5px; align-items: center; font-size: 13px; color: var(--ink-2, #4a4845); padding-top: 2px; white-space: nowrap; }
+  .rv-body { min-width: 0; }
+  .rv-text { margin: 0; }
+  .rv-status { display: inline-flex; gap: 5px; padding-top: 3px; }
+  .rv-where { display: block; color: var(--ink-2, #4a4845); font-size: 13.5px; margin-top: 2px; }
+  .rv-where b { font-weight: 600; color: var(--ink-3, #7a7772); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; margin-right: 2px; }
+  .rv-chip { display: inline-block; font-size: 11px; line-height: 1; padding: 3px 7px; border-radius: 999px; border: 1px solid; white-space: nowrap; font-weight: 600; }
+  .rv-chip.verified { color: var(--ok, #2f7d4f); border-color: var(--ok, #2f7d4f); } .rv-chip.failed { color: var(--crit, #9b3b2e); border-color: var(--crit, #9b3b2e); }
+  .rv-chip.blocked { color: var(--warn, #8a6d1f); border-color: var(--warn, #8a6d1f); } .rv-chip.not-run { color: var(--ink-3, #7a7772); border-color: var(--hairline, #d6d1c7); }
+  .rv-chip.fixed { color: var(--accent, #1f4e79); border-color: var(--accent, #1f4e79); }
+  .rv-outcome, .rv-yours { font-size: 13.5px; margin-top: 5px; padding-left: 10px; border-left: 2px solid var(--hairline, #e6e3dd); color: var(--ink-2, #4a4845); }
+  .rv-outcome .rv-who, .rv-yours .rv-who { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3, #7a7772); margin-right: 6px; }
+  .rv-history { font-size: 12.5px; margin-top: 3px; padding-left: 12px; color: var(--ink-3, #7a7772); }
+  .rv-history summary { cursor: pointer; }
+  .rv-history li { margin: 2px 0; }
+  .rv-note { display: block; width: 100%; margin-top: 6px; font: inherit; font-size: 13px; padding: 4px 8px; border: 1px solid var(--hairline, #e6e3dd); border-radius: 5px; background: #fffdf8; }
+  .rv-foot { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--hairline, #e6e3dd); font-size: 13px; color: var(--ink-3, #7a7772); }
+  .rv-stars { display: inline-flex; flex-direction: row-reverse; gap: 2px; }
+  .rv-stars input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .rv-stars label { font-size: 20px; line-height: 1; color: #d6d1c7; cursor: pointer; }
+  .rv-stars input:checked ~ label, .rv-stars label:hover, .rv-stars label:hover ~ label { color: var(--warn, #8a6d1f); }
+  .rv-human { margin: 0 0 16px; }
+  .rv-human ul { margin: 4px 0 0; padding-left: 22px; }
+  .rv-revisions { margin: 0; }
+  .rv-revisions textarea { width: 100%; min-height: 120px; font: inherit; font-size: 14px; padding: 10px 12px; border: 1px solid var(--hairline, #e6e3dd); border-radius: 6px; background: #fffdf8; }
+  .rv-send { display: flex; gap: 12px; align-items: center; margin-top: 10px; }
+  .rv-send button { font: inherit; font-size: 14px; padding: 7px 14px; border: 1px solid var(--accent, #1f4e79); border-radius: 6px; background: var(--accent, #1f4e79); color: #fff; cursor: pointer; }
+  .rv-send .rv-queued { font-size: 12.5px; color: var(--ok, #2f7d4f); }
+</style>
+<p class="rv-intro">Try each check where it says. Tick <b>Works</b> when it did; click a row's text to comment on that row; the box at the bottom is for anything longer. <b>Send my checks</b> sends everything at once.</p>
+
+<form class="rv-group" data-lavish-question="Review checks · Phase 6" data-group="Phase 6" onsubmit="event.preventDefault()">
+  <header class="rv-head">
+    <div class="rv-title">Phase 6 · Search &amp; Notifications <a href="http://localhost:5173/" target="_blank" rel="noopener">localhost:5173</a></div>
+    <div class="rv-facts">branch <code>main</code> · range <code>b88401b..HEAD</code> · session <code>phase-6 · implementer</code> · verified 2026-08-25</div>
+    <div class="rv-counter">0 of 3 work · 1 verified · 2 need you <span class="rv-grade" title="First-pass rate, rounds to green and your stars; computed when the first checks arrive">grade —</span></div>
+  </header>
+  <ul class="rv-rows">
+    <li class="rv-row" data-check="C1" id="rv-phase-6-C1">
+      <span class="rv-id">C1</span>
+      <label class="rv-works"><input type="checkbox" name="works-C1" value="C1"> Works</label>
+      <div class="rv-body">
+        <p class="rv-text">C1 · Searching inside sessions finds a phrase in old transcripts, with a snippet per hit.
+          <span class="rv-where"><b>Where</b> <a href="http://localhost:5173/#/history" target="_blank" rel="noopener">History</a> → switch on “search inside sessions” · <b>Do</b> type <code>count(*)</code> · <b>Expect</b> matching sessions with a highlighted snippet each, and a “scanned N files” line; command wrappers and task notifications never appear as hits.</span></p>
+        <div class="rv-outcome"><span class="rv-who">agent · r1</span>Ran the grep seam against the whole corpus: 14 sessions matched, every snippet parser-backed; synthetic messages excluded (teeth-checked).</div>
+        <input class="rv-note" name="note-C1" placeholder="Your note on C1 (optional)">
+      </div>
+      <div class="rv-status"><span class="rv-chip verified">verified</span></div>
+    </li>
+    <li class="rv-row" data-check="C2" id="rv-phase-6-C2">
+      <span class="rv-id">C2</span>
+      <label class="rv-works"><input type="checkbox" name="works-C2" value="C2"> Works</label>
+      <div class="rv-body">
+        <p class="rv-text">C2 · A session that starts waiting on you raises one browser notification, and only one.
+          <span class="rv-where"><b>Where</b> <a href="http://localhost:5173/" target="_blank" rel="noopener">Board</a> → “Notify me” toggle (grant permission when asked) · <b>Do</b> in any Claude session, run a tool that needs approval and leave the prompt on screen for 20 s · <b>Expect</b> exactly one notification when the card turns “needs you”; none on a page reload while it is still waiting.</span></p>
+        <div class="rv-outcome"><span class="rv-who">agent · r1</span>Not run by the agent: needs a real approval prompt and the browser's permission dialog.</div>
+        <input class="rv-note" name="note-C2" placeholder="Your note on C2 (optional)">
+      </div>
+      <div class="rv-status"><span class="rv-chip not-run">not run</span></div>
+    </li>
+    <li class="rv-row" data-check="C3" id="rv-phase-6-C3">
+      <span class="rv-id">C3</span>
+      <label class="rv-works"><input type="checkbox" name="works-C3" value="C3"> Works</label>
+      <div class="rv-body">
+        <p class="rv-text">C3 · Search still answers when ripgrep is missing, by falling back to the system grep.
+          <span class="rv-where"><b>Where</b> <a href="http://localhost:6161/api/search?q=count(*)" target="_blank" rel="noopener">GET /api/search</a> · <b>Do</b> start the server with <code>PATH=/usr/bin:/bin npm run dev:server</code> on a spare port, then search the same phrase · <b>Expect</b> the same hits, slower (seconds, not milliseconds), and the log line naming the engine it picked.</span></p>
+        <div class="rv-outcome"><span class="rv-who">agent · r2</span>The runtime probe now spawns the binary instead of trusting the shell; with rg hidden the grep path returns the same 14 sessions in 5.4 s.</div>
+        <details class="rv-history"><summary>earlier</summary><ul><li><b>r1</b> failed: <code>spawn("rg")</code> returned ENOENT because the interactive <code>rg</code> was a shell function; the daemon crashed the search instead of falling back.</li></ul></details>
+        <input class="rv-note" name="note-C3" placeholder="Your note on C3 (optional)">
+      </div>
+      <div class="rv-status"><span class="rv-chip failed">failed</span><span class="rv-chip fixed">fixed · r2</span></div>
+    </li>
+  </ul>
+  <div class="rv-foot" data-lavish-ui="review-stars">
+    <span>How did this land?</span>
+    <span class="rv-stars" title="Your rating for this group">
+      <input type="radio" name="stars-phase-6" value="5" id="rv-phase-6-s5"><label for="rv-phase-6-s5">★</label>
+      <input type="radio" name="stars-phase-6" value="4" id="rv-phase-6-s4"><label for="rv-phase-6-s4">★</label>
+      <input type="radio" name="stars-phase-6" value="3" id="rv-phase-6-s3"><label for="rv-phase-6-s3">★</label>
+      <input type="radio" name="stars-phase-6" value="2" id="rv-phase-6-s2"><label for="rv-phase-6-s2">★</label>
+      <input type="radio" name="stars-phase-6" value="1" id="rv-phase-6-s1"><label for="rv-phase-6-s1">★</label>
+    </span>
+  </div>
+</form>
+
+<div class="rv-human"><b>Still needs a human check</b><ul><li>C2 · the browser permission dialog and the real approval prompt.</li></ul></div>
+
+<form class="rv-revisions" data-lavish-question="Review revisions" onsubmit="event.preventDefault(); rvSend()">
+  <textarea name="revisions" placeholder="Anything longer: what you would change, what surprised you, what to do next. The agent splits this into tracked items under the rows or as new R-rows."></textarea>
+  <div class="rv-send" data-lavish-ui="review-send"><button type="submit">Send my checks</button><span class="rv-queued" hidden>queued · press Send to agent in the Lavish bar</span></div>
+</form>
+<script>
+function rvSend() {
+  const q = window.lavish && window.lavish.queuePrompt;
+  const sec = document.getElementById("review-checklist");
+  let queued = 0;
+  for (const form of sec.querySelectorAll("form.rv-group")) {
+    const group = form.dataset.group;
+    const checks = [...form.querySelectorAll(".rv-row")].map((row) => ({
+      id: row.dataset.check,
+      works: !!row.querySelector('input[type=checkbox]')?.checked,
+      note: (row.querySelector(".rv-note")?.value || "").trim(),
+    }));
+    const stars = Number(form.querySelector('input[type=radio]:checked')?.value || 0) || null;
+    if (!checks.some((c) => c.works || c.note) && !stars) continue;
+    const line = checks.map((c) => `${c.id} ${c.works ? "works" : "not yet"}${c.note ? ` (${c.note})` : ""}`).join(", ");
+    const prompt = `Review checks · ${group}: ${line}${stars ? `. Stars: ${stars}` : ""}`;
+    const data = { kind: "checks", group, checks, stars };
+    if (q) q(prompt, { tag: "review", text: `Review checks · ${group}`, element: form, queueKey: form.dataset.lavishQuestion, data });
+    else console.log("no Lavish SDK:", prompt, data);
+    queued++;
+  }
+  const rev = sec.querySelector(".rv-revisions textarea");
+  const text = (rev?.value || "").trim();
+  if (text) {
+    if (q) q(`Review revisions: ${text}`, { tag: "review", text: "Review revisions", element: rev.form, queueKey: "Review revisions", data: { kind: "revisions", text } });
+    else console.log("no Lavish SDK: revisions", text);
+    queued++;
+  }
+  const badge = sec.querySelector(".rv-queued");
+  if (badge) { badge.hidden = false; badge.textContent = queued ? `${queued} queued · press Send to agent in the Lavish bar` : "nothing to send yet: tick a box, write a note or a revision"; }
+}
+</script>
+</details></section>
+<!-- review:end -->

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PLAN TITLE (short, distinctive)</title>
-<meta name="lavish:project" content="your-project">
+<meta name="lavish:project" content="StyleManager-2.0">
 <meta name="description" content="ONE SENTENCE: what this plan decides. Shown on the Lavish home page.">
 <!-- <meta name="lavish:related" content="docs/plans/YYYY-MM-DD-previous-plan.html"> -->
 <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
@@ -192,7 +192,7 @@
     </tbody></table>
   </details></section>
 
-  <!-- 3+ · EVIDENCE: current state, design, execution, plan by PR, risks, open questions -->
+  <!-- 3+ · EVIDENCE: current state, design, plan by PR, risks, open questions -->
   <section class="blk"><details data-sec="Current state">
     <summary class="h"><span class="title">3 · Current state</span><span class="sum">What exists today, verified against the code, with file paths.</span><span class="badges"><span>4 min</span><span>verified against code</span></span></summary>
     <p>…</p>
@@ -207,34 +207,8 @@ flowchart LR
     <p class="figcap">Caption: what the diagram shows.</p>
   </details></section>
 
-  <!-- EXECUTION: which agents are started, in what order and lanes, and what the reader sees while it runs.
-       Manager Marcus's planning flow reads this section (details[data-sec="Execution"]) and gives it to the
-       planner as the draft of the hand-off's execution notes: keep the data-sec value as it is. -->
-  <section class="blk"><details data-sec="Execution">
-    <summary class="h"><span class="title">5 · Execution</span><span class="sum">Which agents are started, in what order and lanes, and what you will see in Manager Marcus while it runs.</span><span class="badges"><span>2 min</span></span></summary>
-    <p>How the work is run, in two or three sentences someone could follow: who coordinates, how many workers there are, what runs side by side and what has to wait for something else.</p>
-    <div class="mermaid-frame"><pre class="mermaid">
-flowchart LR
-  C[Coordinator] --> A1[Lane A · worker · PR1]
-  C --> B1[Lane B · worker · PR2]
-  A1 --> R[Two reviewers per PR]
-  B1 --> R
-  R --> M[Merge in order]
-  M --> A2[Lane A · worker · PR3]
-    </pre></div>
-    <p class="figcap">Caption: one box per agent that is started; an arrow means "waits for"; lanes run side by side.</p>
-    <table><thead><tr><th>Order</th><th>Lane</th><th>Agent</th><th>Does</th><th>Starts when</th></tr></thead><tbody>
-      <tr><td>1</td><td>A</td><td>Worker</td><td>PR1 · scope</td><td>at the start</td></tr>
-      <tr><td>1</td><td>B</td><td>Worker</td><td>PR2 · scope</td><td>at the start, beside lane A</td></tr>
-      <tr><td>2</td><td>both</td><td>Two reviewers</td><td>One checks each PR against the plan, one checks the code</td><td>when a worker reports</td></tr>
-      <tr><td>3</td><td>A</td><td>Worker</td><td>PR3 · scope</td><td>after PR1 and PR2 are merged</td></tr>
-    </tbody></table>
-    <h3>What you will see in Manager Marcus</h3>
-    <p>What appears on the page while this runs, in the order it appears: the plan's stage moving from Approved to Executing, one pane per agent in the workspace's Terminals view, the agents graph with the coordinator and its workers under it, and where a question for you would show up. Say what "done" looks like on the page.</p>
-  </details></section>
-
   <section class="blk"><details data-sec="Plan by PR">
-    <summary class="h"><span class="title">6 · Plan by PR</span><span class="sum">Landable slices in order; the strip shows live PR states inside Lavish.</span><span class="badges"><span>3 min</span><span class="risk">touches prod: migration</span></span></summary>
+    <summary class="h"><span class="title">5 · Plan by PR</span><span class="sum">Landable slices in order; the strip shows live PR states inside Lavish.</span><span class="badges"><span>3 min</span><span class="risk">touches prod: migration</span></span></summary>
     <div class="phase" id="phase"><span data-pr="">PR1 · scope</span><span data-pr="">PR2 · scope</span><span data-pr="">PR3 · scope</span></div>
     <table><thead><tr><th>PR</th><th>Scope</th><th>Depends on</th><th>Verify by</th></tr></thead><tbody>
       <tr><td>PR1</td><td>…</td><td>–</td><td>…</td></tr>
@@ -242,17 +216,17 @@ flowchart LR
   </details></section>
 
   <section class="blk"><details data-sec="Risks and what to review">
-    <summary class="h"><span class="title">7 · Risks and what to review</span><span class="sum">Ordered by how silently it fails; what could not be verified is named.</span><span class="badges"><span>2 min</span></span></summary>
+    <summary class="h"><span class="title">6 · Risks and what to review</span><span class="sum">Ordered by how silently it fails; what could not be verified is named.</span><span class="badges"><span>2 min</span></span></summary>
     <ol class="styled"><li>Highest: RLS, money, migrations, Edge deploys.</li><li>Then: visual and cross-module effects.</li><li>Not verifiable here: …</li></ol>
   </details></section>
 
   <section class="blk"><details data-sec="Open questions">
-    <summary class="h"><span class="title">8 · Open questions</span><span class="sum">What still needs an answer from someone.</span><span class="badges"><span>1 min</span></span></summary>
+    <summary class="h"><span class="title">7 · Open questions</span><span class="sum">What still needs an answer from someone.</span><span class="badges"><span>1 min</span></span></summary>
     <ul class="styled"><li>…</li></ul>
   </details></section>
 
   <section class="blk"><details data-sec="Feedback log">
-    <summary class="h"><span class="title">9 · Feedback log</span><span class="sum">Every review round: what was received, what changed.</span><span class="badges"><span>log</span></span></summary>
+    <summary class="h"><span class="title">8 · Feedback log</span><span class="sum">Every review round: what was received, what changed.</span><span class="badges"><span>log</span></span></summary>
     <ul id="feedlog" class="styled"></ul>
   </details></section>
 </main>
@@ -468,35 +442,6 @@ function sendExport() { window.lavish?.queuePrompt("Save this exported plan to a
 /* ---------- mermaid ---------- */
 mermaid.initialize({ startOnLoad: false, theme: "neutral", securityLevel: "loose" });
 mermaid.run({ querySelector: "pre.mermaid" });
-</script>
-<script>
-/* Built-in plan navigation: existing plans gain it without editing their files. */
-(function(){
- if(document.getElementById('lavish-plan-navigation-style'))return;
- const style=document.createElement('style');style.id='lavish-plan-navigation-style';style.textContent=`
- html,body,.outline,#outline{scrollbar-width:none}html::-webkit-scrollbar,body::-webkit-scrollbar,.outline::-webkit-scrollbar,#outline::-webkit-scrollbar{display:none}
- body{max-width:100%;overflow-x:auto}main,.page,.outline{min-width:0}pre,table{max-width:100%}pre{overflow-x:auto;scrollbar-width:none}pre::-webkit-scrollbar{display:none}
- details[data-sec]>summary{list-style:none}details[data-sec]>summary::-webkit-details-marker{display:none}details[data-sec]>summary::marker{content:''}details[data-sec]>summary::before{display:none!important}
- .lavish-outline-actions{display:flex;gap:5px;flex-wrap:wrap;margin:8px 0}.lavish-outline-actions button,.lavish-section-toggle{font:inherit;font-size:11px;color:inherit;border:1px solid var(--hairline,#ddd);background:transparent;border-radius:4px;padding:3px 5px;cursor:pointer}.lavish-section-toggle{border:0;flex:0 0 auto;width:20px;padding:2px}.lavish-section-toggle svg{display:block;width:12px;height:12px;transition:transform .12s}.lavish-section-toggle[aria-expanded=true] svg{transform:rotate(90deg)}
- `;document.head.appendChild(style);
- function setup(){
-  const sections=[...document.querySelectorAll('details[data-sec]')];if(!sections.length)return;
-  const outline=document.querySelector('#outline,.outline');if(!outline)return;
-  if(!outline.querySelector('.lavish-outline-actions')){
-   const actions=document.createElement('div');actions.className='lavish-outline-actions';
-   for(const [label,open] of [['Expand all',true],['Collapse all',false]]){const b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=()=>sections.forEach(d=>d.open=open);actions.appendChild(b);}outline.prepend(actions);
-  }
-  outline.querySelectorAll('li').forEach((row,i)=>{
-   if(row.querySelector('.lavish-section-toggle'))return;
-   const section=sections.find(d=>d.dataset.sec===row.dataset.sec)||sections[i];if(!section)return;
-   const toggle=document.createElement('button');toggle.type='button';toggle.className='lavish-section-toggle';toggle.setAttribute('aria-label','Toggle '+section.dataset.sec);toggle.setAttribute('aria-expanded',String(section.open));toggle.innerHTML='<svg viewBox="0 0 12 12" aria-hidden="true"><path d="m4 2 4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>';
-   toggle.onclick=e=>{e.stopPropagation();section.open=!section.open;};section.addEventListener('toggle',()=>toggle.setAttribute('aria-expanded',String(section.open)));row.prepend(toggle);
-  });
- }
- if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',setup,{once:true});else setup();
- const observer=new MutationObserver(setup);observer.observe(document.body||document.documentElement,{childList:true,subtree:true});setTimeout(()=>observer.disconnect(),10000);
-})();
-
 </script>
 </body>
 </html>

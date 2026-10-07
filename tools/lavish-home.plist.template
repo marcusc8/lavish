@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.marcus.lavish-home</string>
+  <key>ProgramArguments</key><array><string>__NODE__</string><string>__TOOLS__/lavish-home.mjs</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>EnvironmentVariables</key><dict>
+    <key>PATH</key><string>__PATH__</string>
+    <key>LAVISH_HOME_PORT</key><string>__PORT__</string>
+    <key>LAVISH_TMUX_BIN</key><string>__TMUX__</string>
+    <key>LAVISH_CLAUDE_BIN</key><string>__CLAUDE__</string>
+    <key>LAVISH_CODEX_BIN</key><string>__CODEX__</string>
+  </dict>
+  <key>StandardOutPath</key><string>__HOME__/.lavish-axi/home.log</string>
+  <key>StandardErrorPath</key><string>__HOME__/.lavish-axi/home.log</string>
+</dict></plist>

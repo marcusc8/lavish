@@ -1,0 +1,119 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Phase 6 Plan — Search &amp; Notifications</title>
+<script type="module">import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+const srcs=new Map();document.querySelectorAll(".mermaid").forEach(el=>srcs.set(el,el.textContent));window.__mmSrc=srcs;
+mermaid.initialize({startOnLoad:true,theme:"neutral",themeVariables:{fontFamily:"Avenir Next,Avenir,sans-serif"}});</script>
+<style>
+:root{--bg:#faf7f2;--ink:#22211f;--muted:#6f6a61;--accent:#0f6672;--hair:#e2dcd2;--warn:#8a6d1a}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.65 "Iowan Old Style",Iowan,Georgia,serif}
+.wrap{max-width:880px;margin:0 auto;padding:40px 24px 90px}
+h1{font-size:34px;line-height:1.15;margin:0 0 4px}h2{font-size:21px;margin:0 0 10px;border-bottom:1px solid var(--hair);padding-bottom:6px}
+.kicker{font:600 12px/1 "Avenir Next",Avenir,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
+.sub{color:var(--muted);margin:0 0 26px}
+details{border-top:1px solid var(--hair);padding:14px 0}details>summary{cursor:pointer;font:600 17px "Avenir Next",Avenir,sans-serif;list-style:none;display:flex;gap:10px;align-items:baseline}
+details>summary::before{content:"▸";color:var(--accent);transition:.15s}details[open]>summary::before{transform:rotate(90deg)}
+.badge{font:600 11px/1 "Avenir Next",Avenir,sans-serif;letter-spacing:.06em;color:#fff;background:var(--accent);border-radius:9px;padding:3px 8px}
+.badge.out{background:#8a6d1a}
+table{border-collapse:collapse;width:100%;font-size:14.5px;font-family:"Avenir Next",Avenir,sans-serif}
+td,th{padding:7px 10px;text-align:left;vertical-align:top}tbody tr:nth-child(odd){background:#f3efe7}th{border-bottom:1px solid var(--hair);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+code,pre{font:13px/1.5 "SF Mono",Menlo,monospace;background:#f1ede4;border-radius:4px}code{padding:1px 5px}pre{padding:12px 14px;overflow-x:auto}
+ul{padding-left:22px}li{margin:4px 0}
+.callout{border-left:3px solid var(--accent);background:#eef4f4;padding:10px 14px;margin:12px 0;font-size:15px}
+.warncall{border-left-color:var(--warn);background:#f6f0dd}
+.mermaid-frame{resize:both;overflow:auto;border:1px solid var(--hair);border-radius:6px;padding:8px;background:#fff;min-height:200px}
+.mermaid-frame svg{width:100%!important;height:auto!important}
+.notebox{margin-top:10px}.notebox textarea{width:100%;min-height:54px;border:1px solid var(--hair);border-radius:5px;padding:8px;font:14px/1.5 "Avenir Next",Avenir,sans-serif;background:#fffdf8}
+.stat{display:flex;gap:6px;align-items:center;margin-top:8px;font-family:"Avenir Next",Avenir,sans-serif;font-size:13px;flex-wrap:wrap}
+.stat button{border:1px solid var(--hair);background:#fff;border-radius:12px;padding:3px 10px;cursor:pointer;font:inherit}
+.stat button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+#bar{position:fixed;bottom:0;left:0;right:0;background:#fffdf8;border-top:1px solid var(--hair);padding:9px 20px;display:flex;gap:14px;align-items:center;font:13px "Avenir Next",Avenir,sans-serif}
+#bar .spacer{flex:1}#bar button{border:1px solid var(--accent);color:var(--accent);background:#fff;border-radius:5px;padding:5px 12px;cursor:pointer;font:600 13px "Avenir Next",Avenir,sans-serif}
+dialog{border:1px solid var(--hair);border-radius:8px;max-width:720px;width:92%}dialog textarea{width:100%;height:300px;font:12px/1.5 Menlo,monospace}
+.fb li{border-bottom:1px dotted var(--hair);padding:6px 0}.ts{color:var(--muted);font-size:12px;font-family:"Avenir Next",Avenir,sans-serif}
+.num{font-variant-numeric:tabular-nums;font-weight:600;color:var(--accent)}
+</style></head><body><div class="wrap">
+<p class="kicker">Manager Marcus · Phase 6 of 6 · the last one</p>
+<h1>Search &amp; Notifications</h1>
+<p class="sub">Spec §9's final row. ClickUp is <strong>out</strong> — you declined it, and the spec always said "if still wanted". Plan file: <code>docs/plans/2026-08-25-phase-6-polish.md</code></p>
+
+<div class="callout"><b>Grounded on measurement, not assumption.</b> <span class="num">1.2 GB</span> of transcripts (773 MB Claude + 429 MB Codex). A phrase search across the whole Claude corpus with plain <code>grep</code>: <span class="num">124 ms</span> from the shell — but the number that matters is the path the feature takes: <span class="num">~460 ms</span> end-to-end through Node for a 1,046-file match (the grep is ~34 ms; the rest is Node's spawn overhead). Corrected during Task 1 by review; the conclusion is unchanged. That number is why this phase needs no index, no dependency, and no FTS table — and it disproves a comment phase 3 left behind saying full-text "would need an index MM does not keep". Part of Task 4 is correcting that comment.</div>
+
+<details open data-sec="search"><summary>Search — grep narrows, the existing parsers render <span class="badge">core</span></summary>
+<div class="mermaid-frame"><pre class="mermaid">flowchart LR
+  Q["/api/search?q=…"] --> G["grepFiles()<br/>grep -r -l -F --<br/>124ms over 1.2GB"]
+  G --> M["map file → session<br/>via the registry"]
+  M --> S["snippetsFor()<br/>reuses parseLine /<br/>parseRollout"]
+  S --> R["hits + snippets<br/>+ scanned/truncated"]</pre></div>
+<ul>
+<li><b>Two steps, no new reader.</b> grep answers "which files", the phase-1/2 parsers answer "what does it say". MM never grows a second way to read a transcript.</li>
+<li><b>Synthetic messages stay excluded</b> — command wrappers, task notifications, Codex machine blocks. They are not things you wrote or read, and phase 2 already settled that rule.</li>
+<li><b>A grep hit with no snippet is normal</b>, not an error: the raw JSON matched but the parser classified the event as synthetic. Those hits are dropped.</li>
+<li><b>It lives in History</b>, behind a "search inside sessions" toggle. Off is today's instant card filter, untouched.</li>
+</ul></details>
+
+<details data-sec="notify"><summary>Notifications — pure web, transition-only <span class="badge">core</span></summary>
+<ul>
+<li><b>No server change at all.</b> A hook over the feed <code>useSessions</code> already provides.</li>
+<li><b>Fires on the transition into <code>needs_you</code></b>, never on a sustained one — the feed re-broadcasts every ~500 ms and would otherwise notify forever.</li>
+<li><b>A fresh page load never notifies</b> for state that already existed. This is the case most likely to be got wrong, so it gets its own test and a teeth-check.</li>
+<li><b>Permission is requested on your click</b>, because browsers ignore it otherwise. If the browser has no Notification API the toggle is hidden rather than dead.</li>
+</ul>
+<div class="callout warncall"><b>The trade-off you chose:</b> browser notifications only fire while a board tab is open. The alternative — the server spawning <code>osascript</code> — works with no browser but means MM's daemon interrupts you from the background. You picked the quieter one.</div></details>
+
+<details data-sec="tasks"><summary>The 6 tasks <span class="badge">plan</span></summary>
+<table><thead><tr><th>#</th><th>Task</th><th>Ships</th></tr></thead><tbody>
+<tr><td>1</td><td>grep seam</td><td><code>grepFiles()</code> — fixed-string, <code>--</code>-terminated, degrades to <code>[]</code>; exit-1-means-no-match</td></tr>
+<tr><td>2</td><td>Snippets</td><td>parser-backed, ≤240 chars match-centred, synthetics excluded (teeth-checked)</td></tr>
+<tr><td>3</td><td>The route</td><td><code>GET /api/search</code> — 400 under 3 chars, <code>scanned</code>/<code>truncated</code>, no silent caps</td></tr>
+<tr><td>4</td><td>History UI</td><td>toggle, marked snippets, truncation line, and the stale phase-3 comment corrected</td></tr>
+<tr><td>5</td><td>Notifications</td><td><code>newlyNeedsYou()</code> pure + tested, permission toggle, one notification per transition</td></tr>
+<tr><td>6</td><td>Docs</td><td>README row 6 → Built, amendments folded, roadmap closed</td></tr>
+</tbody></table></details>
+
+<details data-sec="risks"><summary>Risks the plan pre-empts <span class="badge">review</span></summary>
+<ul>
+<li><b>grep exit 1 means "no match", not failure</b> — treating it as an error makes every empty search look broken.</li>
+<li><b>Regex injection</b> — <code>-F</code> makes your "(" literal; <code>--</code> stops a query starting with "-" being read as a flag. Phase 4 learned that one the hard way with <code>codex exec</code>. Both get a pinning test.</li>
+<li><b>Notification spam</b> — transition-only, and never on reload.</li>
+<li><b>Cadence check</b> — Tasks 1–3 touch <code>server/src</code>, so <code>server.test.ts</code> runs at the real 5 s / 500 ms cadence before merge. <code>--config /dev/null</code> is <em>not</em> that check: it silently drops the web tests.</li>
+</ul>
+<p class="ts">ClickUp export: dropped per your instruction. Nothing in this phase sends anything anywhere.</p></details>
+
+<details data-sec="fb"><summary>Feedback log</summary><ul id="fblog-static" class="fb">
+<li><span class="ts">2026-08-25 · Marcus</span><br>All four sections marked <b>Approved</b>, no notes.<br><span class="ts">agent</span> — Execution started. Task 1 (the grep seam) is committed: fixed-string and <code>--</code>-terminated, exit-1-means-no-match, degrades to <code>[]</code>, 7 tests, and a teeth check confirming that removing <code>-F</code> genuinely breaks the literal <code>count(*)</code> search.</li>
+</ul><ul id="fblog" class="fb"></ul></details>
+
+<div id="bar"><span id="tally"></span><span class="spacer"></span><button id="exportBtn">Export plan (.md)</button></div>
+<dialog id="exportDlg"><h2>Export</h2><textarea id="exportTxt"></textarea><p><button id="copyBtn">Copy</button> <button id="dlBtn">Download .md</button> <button id="sendBtn" hidden>Send to agent</button> <button onclick="exportDlg.close()">Close</button></p></dialog>
+<script>
+const LS=(k,v)=>{try{return v===undefined?JSON.parse(localStorage.getItem(k)||"null"):localStorage.setItem(k,JSON.stringify(v))}catch{return null}};
+const state=LS("p6rev")||{notes:{},status:{}};
+document.querySelectorAll("details[data-sec]").forEach(d=>{const id=d.dataset.sec;if(id==="fb")return;
+const box=document.createElement("div");box.className="notebox";
+box.innerHTML='<div class="stat"><button data-s="ok">Approved</button><button data-s="chg">Needs changes</button><button data-s="q">Question</button></div><textarea placeholder="+ Add note (persists locally)"></textarea>';
+const ta=box.querySelector("textarea");ta.value=state.notes[id]||"";ta.oninput=()=>{state.notes[id]=ta.value;LS("p6rev",state);tally()};
+box.querySelectorAll("button").forEach(b=>{if(state.status[id]===b.dataset.s)b.classList.add("on");
+b.onclick=()=>{state.status[id]=state.status[id]===b.dataset.s?null:b.dataset.s;LS("p6rev",state);box.querySelectorAll("button").forEach(x=>x.classList.toggle("on",state.status[id]===x.dataset.s));tally();
+if(window.lavish&&state.status[id])window.lavish.queuePrompt({text:`[${id}] marked ${b.textContent}${ta.value?": "+ta.value:""}`});logFb(`[${id}] ${b.textContent}${ta.value?": "+ta.value:""}`)}});
+d.appendChild(box)});
+function tally(){const s=Object.values(state.status).filter(Boolean);const n=Object.values(state.notes).filter(x=>x&&x.trim()).length;
+document.getElementById("tally").textContent=`${s.filter(x=>x==="ok").length} approved · ${s.filter(x=>x==="chg").length} needs changes · ${s.filter(x=>x==="q").length} questions · ${n} notes`}
+tally();
+const fb=LS("p6fb")||[];const ul=document.getElementById("fblog");
+function renderFb(){ul.innerHTML=fb.map(e=>`<li><span class="ts">${e.t}</span><br>${e.x}</li>`).join("")}renderFb();
+function logFb(x){fb.push({t:new Date().toLocaleString(),x});LS("p6fb",fb);renderFb()}
+exportBtn.onclick=()=>{let md="# Phase 6 Plan — Search & Notifications (export)\n\n";
+document.querySelectorAll(".wrap > p, .wrap > .callout, details[data-sec]").forEach(el=>{
+if(el.matches("details")){const id=el.dataset.sec;if(id==="fb")return;md+="\n## "+el.querySelector("summary").textContent.trim()+"\n\n";
+el.querySelectorAll("li").forEach(li=>md+="- "+li.textContent.trim()+"\n");
+el.querySelectorAll("tbody tr").forEach(tr=>md+="- "+[...tr.cells].map(c=>c.textContent.trim()).join(" · ")+"\n");
+[...el.querySelectorAll(".mermaid")].forEach(m=>{const s=window.__mmSrc?.get(m);if(s)md+="\n```mermaid\n"+s.trim()+"\n```\n"});}
+else md+=el.textContent.trim()+"\n\n"});
+md+="\n## Review notes\n\n";for(const[k,v]of Object.entries(state.status))if(v)md+=`- [${k}] status: ${v}\n`;
+for(const[k,v]of Object.entries(state.notes))if(v&&v.trim())md+=`- [${k}] note: ${v.trim()}\n`;
+exportTxt.value=md;sendBtn.hidden=!window.lavish;exportDlg.showModal()};
+copyBtn.onclick=()=>navigator.clipboard.writeText(exportTxt.value).catch(()=>{});
+dlBtn.onclick=()=>{const a=document.createElement("a");a.href="data:text/markdown;charset=utf-8,"+encodeURIComponent(exportTxt.value);a.download="phase-6-plan-export.md";a.click()};
+sendBtn.onclick=()=>{window.lavish.queuePrompt({text:exportTxt.value,tag:"export"});logFb("Export sent to agent")};
+</script>
+</div></body></html>

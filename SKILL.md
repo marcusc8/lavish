@@ -59,7 +59,7 @@ their CLIs are on PATH via `~/.local/bin`.
 - **`lavish-axi end <html-file>`** when a review is finished (final feedback applied, or the user says
   done). The home page flags sessions open for 14+ days as stale.
 - **Upgrading**: `tools/lavish-upgrade.sh [version]` installs, re-applies the patch, rolls back if an
-  anchor no longer fits. Only when Marcus asks. `node tools/patch-lavish.mjs --check` reports patch state.
+  anchor no longer fits. Only when the user asks. `node tools/patch-lavish.mjs --check` reports patch state.
 - **Moved artifacts**: sessions are keyed by the file's real path. If a folder is renamed, run
   `tools/relink-paths.mjs --dry-run` then without the flag (it stops the server, backs up `state.json`,
   moves sessions, history, private notes, versions and registry records to their new keys).
@@ -69,7 +69,7 @@ their CLIs are on PATH via `~/.local/bin`.
 
 - **Theme**: light, Instagram palette (white surfaces, near-black text, blue accent) instead of the stock
   black + brass; the annotation card inside the artifact matches.
-- **Comment mode** (top bar, "Agent | Notes"): in Agent mode what Marcus writes on an element is queued
+- **Comment mode** (top bar, "Agent | Notes"): in Agent mode what the user writes on an element is queued
   for the agent; in Notes mode everything he writes is a private comment. The annotation card follows the
   mode (primary button "Queue" vs "Save private note", the other one swaps in as secondary).
 - **Comments rail** — a column between the artifact and the Conversation panel, toggled with the
@@ -80,11 +80,11 @@ their CLIs are on PATH via `~/.local/bin`.
   - **Private** comments: "Keep private" on the card, Notes mode, "+ Private note" for a general note, or
     `window.lavish.privateNote(text, opts)` from artifact code. Saved on this machine
     (`~/.lavish-axi/notes/<key>.json` through the home page; localStorage while it is down). **They are
-    never delivered to the agent — do not read `~/.lavish-axi/notes/` unless Marcus asks you to.** They
+    never delivered to the agent — do not read `~/.lavish-axi/notes/` unless the user asks you to.** They
     survive reloads and revisions; when their element is gone they move to a collapsed "Detached" group.
   - **Queued** comments: the send queue, as editable cards (Edit, or double-click; Keep private; Remove).
     Clicking a pill in the Conversation panel opens the same editor. **Suggestions** ("Suggest edit" on the
-    card: the element's text prefilled, Marcus edits it, "Queue suggestion") show as old → new.
+    card: the element's text prefilled, the user edits it, "Queue suggestion") show as old → new.
   - **Images on comments**: while editing a card, "Attach image" or paste. Agent-bound comments use Lavish's
     own attachment store, so the agent receives them as `attachments` on the prompt (fetch
     `GET /api/<key>/attachments/<id>` on :4387 when the image matters). Private comments store theirs through
@@ -201,7 +201,7 @@ their CLIs are on PATH via `~/.local/bin`.
 - **Naming rule for new plans (D8)**: the `<title>` says what the plan decides, entity first, 3 to 7 words, no dates
   or codes ("Samples shipments, bins, ladder and lists", not "2026-09-04-samples-logistics-and-lists"). Existing plans
   keep their titles until renamed on their plan page.
-- **Front-matter for new artifacts**: `<meta name="lavish:project" content="StyleManager-2.0">`,
+- **Front-matter for new artifacts**: `<meta name="lavish:project" content="your-project">`,
   `<meta name="description" content="one sentence: what this plan decides">`, optionally `lavish:related`. Status and
   PRs go through `lavish-meta`.
 - `/api/sessions` carries `tags [{id,name}]`, `tabs`, `build`, `added` and `agent {provider,id,state,name,model,
@@ -263,7 +263,7 @@ Stock component-kit themes read as generic AI output. Artifacts should feel deli
 **Start every plan from `~/.claude/skills/lavish/tools/plan-template.html`** (copy it, keep it a single
 self-contained .html: vanilla JS, no build step, the Mermaid CDN as the only external dependency, opens
 directly with no server). Reference implementation of the skeleton: StyleManager
-`.lavish/2026-09-02-lavish-planning-upgrades.html`. The skeleton, which Marcus approved on 2026-09-02:
+`.lavish/2026-09-02-lavish-planning-upgrades.html`. The skeleton, which the user approved on 2026-09-02:
 
 - **Front-matter**: `<title>` (the naming rule, D8 of the home redesign: what the plan decides, entity
   first, 3 to 7 words, no dates or codes — the home page and the Lavish tab show it verbatim; a plan can be
@@ -285,7 +285,7 @@ directly with no server). Reference implementation of the skeleton: StyleManager
   document; a plan that says nothing here leaves the coordinator to guess. Keep the `data-sec` value exactly
   `Execution`, because that is what the flow looks for. Name roles and lanes, not model ids or dates: those
   change, and the settings decide them when the plan runs.
-- **Plain language first** (Marcus, D13): Read this first and Decisions are written for a reader who does
+- **Plain language first** (the user, D13): Read this first and Decisions are written for a reader who does
   not code. Say what will happen and what it changes for the person using the product, in everyday words;
   define a technical term the first time it is needed, or leave it out. File paths, function names, table
   names and other identifiers belong in the evidence sections (Current state, Design, Execution, Plan by
@@ -316,7 +316,7 @@ directly with no server). Reference implementation of the skeleton: StyleManager
   The durable records are the history jsonl, the versions, and the rail's sent cards on the home page.
 - **Stage strip and export dialog** are part of the skeleton: keep the `.stage` block under the header (it
   paints itself from the registry inside Lavish) and the export dialog with its format and appendix options.
-- **Explain with examples** (Marcus, 2026-09-02): when a section explains something unfamiliar or
+- **Explain with examples** (the user, 2026-09-02): when a section explains something unfamiliar or
   complicated, open with a concrete case in an `.example` callout using this project's entities (a linesheet,
   a sample cart, a factory PO, a container), then state the rule. Prefer a chart (inline SVG or Mermaid, per
   the `dataviz` skill) or a table with real numbers to adjectives; put the source link right next to the
@@ -349,7 +349,7 @@ For flows, architecture, state, or sequence diagrams, do not hand-build boxes-an
 - Rendered Mermaid diagrams in `.mermaid` containers become embedded, editable Excalidraw whiteboards in the browser (click a diagram to unlock editing; a Fullscreen action opens it over the whole viewport) - flowchart, sequence, class, ER, and state diagrams convert to editable shapes; other types embed as an image to draw on. Scenes autosave locally; when a reload detects a changed Mermaid source, the reviewer explicitly chooses to re-convert and discard saved edits or keep editing the saved scene. Standalone and exported copies still render plain Mermaid. Queue feedback adds a prompt to the Conversation panel; when the user sends it, poll returns a tag "whiteboard" prompt carrying a bounded edit summary plus local scenePath (.excalidraw JSON) and previewPath (PNG) files - read the summary first, open the files only when needed, then apply the edits by updating the Mermaid source in the artifact (never try to write the scene back)
 - Run `lavish-axi end <html-file>` to end a session as the agent - ending it this way still allows a plain reopen later. When the user ends it from the browser instead, a later `lavish-axi <html-file>` refuses to reopen it without `--reopen`
 - Run `lavish-axi export <html-file> [--out <path>]` to write a portable copy of the artifact - one HTML file with its LOCAL assets inlined - so it opens with no Lavish server and no sibling files. Remote CDN/font references are left as links, so it needs network to render those. Users can also export from the browser chrome's overflow menu
-- Run `lavish-axi share <html-file> [--password <pw>] [--token <t>]` to publish the artifact on ht-ml.app (https://ht-ml.app), a third-party hosting service not part of Lavish, and get back a visitable URL. Shares are PUBLIC by default, so anyone with the link can open them. Pass --password to publish a PRIVATE password-protected page; viewers must supply the password to view. Local assets are inlined; remote refs load over the network. It returns the url plus a secret update_key for managing the page later. Use --token or LAVISH_AXI_HTML_APP_TOKEN only when you have an optional bearer token; it is never required. Users can also publish from the browser chrome's overflow menu. **Never run `share` unless Marcus explicitly asks** (it publishes to a public third-party host).
+- Run `lavish-axi share <html-file> [--password <pw>] [--token <t>]` to publish the artifact on ht-ml.app (https://ht-ml.app), a third-party hosting service not part of Lavish, and get back a visitable URL. Shares are PUBLIC by default, so anyone with the link can open them. Pass --password to publish a PRIVATE password-protected page; viewers must supply the password to view. Local assets are inlined; remote refs load over the network. It returns the url plus a secret update_key for managing the page later. Use --token or LAVISH_AXI_HTML_APP_TOKEN only when you have an optional bearer token; it is never required. Users can also publish from the browser chrome's overflow menu. **Never run `share` unless the user explicitly asks** (it publishes to a public third-party host).
 - Run `lavish-axi stop` to shut down the background server (it also self-stops when idle or after the last session ends with nothing connected). It kills every session's in-flight poll on this machine: check `ps -eo args | grep 'lavish-poll'` first.
 - Run `lavish-axi playbook <playbook_id>` for focused artifact guidance. One artifact often combines several playbooks (for example a plan that includes a comparison and a diagram), so MUST open each matching playbook before writing HTML.
 - Lavish does not auto-inject any design system - artifacts stay portable so they render identically when opened directly without lavish-axi running. Before writing any HTML: Decide the design direction in this strict priority order, and only move to the next step when the current one truly yields nothing: (1) if the user asked for a specific look or named design system, use that; (2) otherwise you must first inspect the project the artifact is about - the subject or product whose content or UI it represents, which may differ from your current working directory - and match that project's design system: Tailwind or theme config, shared CSS variables or design tokens, component library, brand assets, or existing styled pages. If the artifact previews, proposes, or mocks a specific app's UI, render it in that app's own design system so it faithfully shows the product, even when you are running in a different repo; (3) only when both steps come up empty, use the Lavish-recommended Tailwind CSS browser runtime v4 + DaisyUI v5, available via CDN, and prefer that CDN snippet over hand-writing styles unless explicitly instructed otherwise by the user - but restyle it per the Design direction section above: define a quiet custom theme (neutral base + one restrained accent) with DaisyUI theme CSS variables instead of shipping a stock accent-heavy theme name. Run `lavish-axi design` for a content-to-playbook router, a copy-pasteable CDN snippet, a Mermaid CDN snippet/init for diagrams, and the DaisyUI component reference. When you deliver the artifact, state which of the three design sources you used and why.
