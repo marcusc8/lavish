@@ -16,6 +16,84 @@ pins one upstream version, patches it with the features we rely on, and adds the
 | `extras/review-changes/` | The **review-changes** skill + `review-checklist` CLI: after a PR lands, a checklist of things the reviewer tries in the app is built onto the plan page (where, do, expect, screenshot), ticked in the browser, and the agent's fixes land under each row. |
 | `extras/verify-changes/` | The **verify-changes** skill + `/verify` command: a manifest of falsifiable UI checks written during the work, then driven through Playwright against a dev server as a service account, with a bounded auto-fix loop. Per project. |
 
+## What it looks like
+
+Every screen below is the real tool running on a small demo (two fictional projects, four plans). Nothing is mocked.
+
+### The home page: every plan of every project
+
+![The Lavish home page: one table per project with plan status, build state, the agent session that owns each plan, and View / Resume actions](docs/images/home.png)
+
+One row per plan. **Plan status** is what the agent recorded with `lavish-meta`; **Build** is derived from that and the
+PR states; **Session** names the agent session that last polled the plan, its model, and whether it is alive. **Resume**
+reopens that session in a terminal. Filters at the top, tags in the sidebar, columns and sort remembered per browser.
+
+### The editor: the plan, the comments rail, the conversation
+
+![The Lavish editor: the plan on the left with numbered pins, the Comments rail in the middle with sent comments and the agent's threaded replies under each, the conversation with the agent on the right](docs/images/editor.png)
+
+Left, the plan with a numbered pin on every commented element. Middle, the **Comments rail**: each card is anchored to an
+element, clicking it scrolls there; the agent's reply sits under the comment it answers. Right, the **conversation** with
+the agent, the saved chats of this plan, and the Send box with the verdict picker (Comment · Approve plan · Request changes).
+The top bar shows the version and round (`v3 · round 3`) and the stage (`Developing · 0 of 1 PRs merged`).
+
+### Before Send: queued comments and a private note
+
+![The rail before Send: two queued comments for the agent and one private note that never leaves the machine](docs/images/comments-queued.png)
+
+Click any element, write, and press **Queue** (for the agent) or **Keep private** (a note for yourself: it is stored on this
+machine through the home page and never delivered). Queued cards can be edited or removed until **Send to Agent**.
+The Agent | Notes switch in the top bar counts both. Unsent comments survive a reload and a browser change.
+
+### The plan page: conversation, history, versions
+
+![The plan page on the home: stage line, the agent block with Resume, the whole conversation, the plan-details form, the history table and the versions table with View / Diff / Continue from](docs/images/plan-page.png)
+
+One page per plan: the stage strip, the agent block (state, session, model; Go to session, Resume, New chat), the whole
+conversation including private comments in place, the status / priority / PR form, a **History** of what happened (status
+changes, PRs, notes, sessions) and the **Versions** table.
+
+### Versions: what changed between two rounds
+
+![A diff between version 2 and version 3 of the plan, as the text a reader sees: removed lines in red, added lines in green](docs/images/version-diff.png)
+
+`lavish-poll` saves a version every time the file changed since the last round. The diff compares the text a reader sees,
+not the markup. A version page shows that snapshot beside the comments, replies and notes of its moment, with
+**Continue from** to put it back on disk:
+
+![A saved version shown read-only beside the comments and replies that belong to that moment](docs/images/version-page.png)
+
+### The review checklist (review-changes)
+
+![The Review checklist section inside a plan: one group per PR, each row with priority, what to test, where, steps, the expected result, the verify run's outcome, and a Works tick box](docs/images/review-checklist.png)
+
+After a PR lands, `review-checklist build` renders the manifest of checks into the plan itself. Each row says where to
+test, what to do and what to expect; the verify run's outcome sits under the expected result; the reviewer ticks **Works**
+or comments on the row and presses **Send my checks**, which reaches the agent through the same poll.
+
+### The manifest behind it (verify-changes)
+
+The checklist above was built from this file, written during the work and filled in by the verify run:
+
+```
+route:   /billing/checkout
+branch:  feat/billing/one-page-checkout
+mode:    read-only
+role:    customer
+
+CHECKS
+  C1  one-page     priority: High · area: One-page checkout · test: Complete a purchase on one page · where: /billing/checkout · do: Open Checkout with two items in the cart, fill the address, press Pay · expect: One page from start to finish; the receipt screen appears without a second Continue
+  C2  pay-visible  priority: High · area: Pay button · test: The Pay button stays visible · where: /billing/checkout · do: Scroll through the whole page on a phone-sized window · expect: The Pay button stays pinned at the bottom the whole time
+
+RESULT
+  C1  one-page     PASS — purchase completed on one page, receipt shown
+  C2  pay-visible  FAIL — on a 375 px window the Pay button scrolls away under the payment block
+  console: 0 errors
+```
+
+`/verify` drives a headless browser through those checks against a dev server, signed in as a service account, fixes what
+it can in at most three rounds, and writes the RESULT block. `review-checklist build` turns the same file into the page.
+
 ## Requirements
 
 - macOS for the full setup (the home page uses launchd, tmux, osascript and Terminal.app for Resume / New session;
