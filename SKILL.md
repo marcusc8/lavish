@@ -274,8 +274,23 @@ directly with no server). Reference implementation of the skeleton: StyleManager
   decision card, recommended option pre-checked, decided ones keep their answer via `data-decided`; the
   standard `table.alts` for alternatives: Option · What it buys · What it costs, `tr.rec` marks the
   recommendation) · then the evidence: Current state (verified against code, file paths) · Design ·
-  Plan by PR · Risks and what to review (ordered by how silently it fails; what could not be verified is
-  named) · Open questions · Feedback log.
+  Execution · Plan by PR · Risks and what to review (ordered by how silently it fails; what could not be
+  verified is named) · Open questions · Feedback log.
+- **Execution section** (`details[data-sec="Execution"]`, between Design and Plan by PR): which agents are
+  started, in what order and in which lanes, with ONE diagram (one box per agent, an arrow for "waits for"),
+  a table of the same (order, lane, agent, what it does, when it starts), and a paragraph headed "What you
+  will see in Manager Marcus" that says what appears on the page while the plan runs and what done looks
+  like. Write it as instructions someone could follow: Manager Marcus's planning flow reads this section and
+  gives it to the planner as the draft of the coordinator's hand-off, so the plan and the hand-off stay one
+  document; a plan that says nothing here leaves the coordinator to guess. Keep the `data-sec` value exactly
+  `Execution`, because that is what the flow looks for. Name roles and lanes, not model ids or dates: those
+  change, and the settings decide them when the plan runs.
+- **Plain language first** (Marcus, D13): Read this first and Decisions are written for a reader who does
+  not code. Say what will happen and what it changes for the person using the product, in everyday words;
+  define a technical term the first time it is needed, or leave it out. File paths, function names, table
+  names and other identifiers belong in the evidence sections (Current state, Design, Execution, Plan by
+  PR), never in the answer paragraph or in a decision's question and options: the reader decides from the
+  answer and the decisions alone, and a sentence they cannot read is a decision they cannot make.
 - **Sticky outline** (`nav.outline`, built by the template JS from `details[data-sec]`): one entry per
   section with its review-status dot, the tally at the bottom, click to jump, active section follows
   the reading position; a Hide button and, below 1000 px (the Lavish iframe with both rails open), a
@@ -339,3 +354,18 @@ For flows, architecture, state, or sequence diagrams, do not hand-build boxes-an
 - Run `lavish-axi playbook <playbook_id>` for focused artifact guidance. One artifact often combines several playbooks (for example a plan that includes a comparison and a diagram), so MUST open each matching playbook before writing HTML.
 - Lavish does not auto-inject any design system - artifacts stay portable so they render identically when opened directly without lavish-axi running. Before writing any HTML: Decide the design direction in this strict priority order, and only move to the next step when the current one truly yields nothing: (1) if the user asked for a specific look or named design system, use that; (2) otherwise you must first inspect the project the artifact is about - the subject or product whose content or UI it represents, which may differ from your current working directory - and match that project's design system: Tailwind or theme config, shared CSS variables or design tokens, component library, brand assets, or existing styled pages. If the artifact previews, proposes, or mocks a specific app's UI, render it in that app's own design system so it faithfully shows the product, even when you are running in a different repo; (3) only when both steps come up empty, use the Lavish-recommended Tailwind CSS browser runtime v4 + DaisyUI v5, available via CDN, and prefer that CDN snippet over hand-writing styles unless explicitly instructed otherwise by the user - but restyle it per the Design direction section above: define a quiet custom theme (neutral base + one restrained accent) with DaisyUI theme CSS variables instead of shipping a stock accent-heavy theme name. Run `lavish-axi design` for a content-to-playbook router, a copy-pasteable CDN snippet, a Mermaid CDN snippet/init for diagrams, and the DaisyUI component reference. When you deliver the artifact, state which of the three design sources you used and why.
 - Use lavish-axi when the user asks for a visual artifact, HTML explainer, interactive prototype, review surface, product or technical plan, comparison, report, or browser-based feedback loop
+
+
+## Saved chats and connections (2026-09-09)
+
+The home page and the editor share a saved-chat picker. Browsing an older chat does not change the active connection; **Resume** explicitly selects it. **New chat** starts a fresh provider session with the plan and a short progress handoff. **Reconnect** retries its existing session without silently starting another.
+
+When a launch or resume prompt supplies `--chat <id>`, keep that flag on every `lavish-poll` call. A superseded response means another chat now owns the plan: stop polling and do not continue editing that plan until explicitly resumed. Only the active chat's delivery token can receive feedback or write replies. Keep an indefinite foreground poll attached while listening; a running provider process alone is not proof of listening.
+
+The chat records live under `~/.lavish-axi/chats/`, separate from the shared skill files. They contain personal session identities and are not part of a public skill distribution. Older unattributed messages remain in Earlier conversation; never infer their owner from the latest agent. Private notes must not be included in handoffs.
+
+GitHub PR and Vercel links referenced in the document or agent replies appear in both plan information and the editor conversation. PR refresh also collects Vercel links from the PR body, comments and check results. Include resulting PR/deployment URLs in plan progress replies so they can be referenced later.
+
+The shared viewer supplies hidden scrollbars, outline section toggles, and Expand all / Collapse all to existing plans. New documents made from `tools/plan-template.html` include the same controls for standalone viewing. `patch-lavish.mjs` installs the shared server/chat patch through `patch-plan-workspaces.mjs`; run the regular patch and `--reapply-rail` when updating an already-patched installation.
+
+A session actively owned by a desktop app cannot be safely resumed by launching a second CLI writer. Reconnect reports that condition and the existing session to use. New/resumed terminal agents remain pending until their actual poll confirms the connection; never claim a successful connection merely because a launch command returned.

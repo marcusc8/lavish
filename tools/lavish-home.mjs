@@ -49,6 +49,9 @@
  * `node lavish-home.mjs --check-contrast` runs the palette gate alone (every text/background token pair ≥ 4.5:1, both palettes).
  */
 import http from "node:http";
+import { randomUUID as mmRandomUUID } from "node:crypto";
+import { readChats, ensureChats, selectChat, reserveLaunch, markLaunched, markUncertain, markDelegated, rememberWhere, failLaunch, groupMessages, listeningState, extractLinks, ownLinks } from "./lavish-chats.mjs";
+import { fileURLToPath } from "node:url";
 import { existsSync, statSync, copyFileSync, readFileSync, createReadStream, mkdirSync, writeFileSync, readdirSync, unlinkSync, rmSync } from "node:fs";
 import { join, basename, dirname, resolve, extname, normalize as normPath } from "node:path";
 import { spawnSync, spawn } from "node:child_process";
@@ -173,6 +176,11 @@ function loadSessions() {
     };
     const info = session.agent.state === "none" ? null : sessionInfoOf(reg.agent);
     session.agent.model = info ? info.model : ""; session.agent.startedAt = info ? info.startedAt : ""; session.agent.lastAt = info ? info.lastAt : "";
+    const chatState=readChats(key);
+    session.connection=listeningState(chatState);
+    session.chatState=chatState;
+    const active=chatState.chats[chatState.activeChatId];
+    if(active?.agent?.id){session.agent=agentState({agent:active.agent},liveCache,liveCache.tmux); const info=sessionInfoOf(active.agent); session.agent.model=info.model||active.agent.model||''; session.agent.lastAt=info.lastAt||active.lastSeenAt||'';}
     session.plan = derivePlan(session);
     return session;
   }).sort((a, b) => b.updated - a.updated);
@@ -183,7 +191,10 @@ function derivePlan(s) {
   for (const n of s.head.prs) prs[n] = { n, source: "declared" };
   for (const [n, rec] of Object.entries(s.reg.prs || {})) prs[n] = { ...(prs[n] || {}), ...rec, n: Number(n) };
   const agentTexts = [...s.chat.filter((c) => c.role === "agent").map((c) => c.text), ...s.history.filter((h) => h.role === "agent").map((h) => h.text)];
-  for (const n of extractPrMentions(agentTexts)) if (!prs[n]) prs[n] = { n, source: "inferred" };
+  for (const n of extractPrMentions(agentTexts.map(t=>String(t).replace(/https?:\/\/[^\s<>"']+/g,"")))) if (!prs[n]) prs[n] = { n, source: "inferred" };
+  const refs=ownLinks(extractLinks([s.resolved ? readFileSync(s.resolved,'utf8') : '',...agentTexts,...Object.values(prs).flatMap(p=>(p.links||[]).map(l=>l.url)),...Object.values(prs).map(p=>p.url||(s.resolved&&gitInfo(s.resolved).webBase?gitInfo(s.resolved).webBase+'/pull/'+p.n:''))]),Object.values(prs));
+  const repoBase=s.resolved?gitInfo(s.resolved).webBase:'';
+  for(const ref of refs){if(ref.kind==='pr'&&repoBase&&ref.url.startsWith(repoBase+'/pull/')){const n=Number(new URL(ref.url).pathname.split('/')[4]);if(n&&!prs[n])prs[n]={n,url:ref.url,source:'inferred'};}}
   const list = Object.values(prs).filter((p) => !(p.source === "inferred" && p.missing)).sort((a, b) => a.n - b.n);
   const declared = normalizeStatus(s.reg.status || s.head.status || "");
   let status = declared, inferred = false, note = "";
@@ -203,7 +214,7 @@ function derivePlan(s) {
   const build = buildOf(status, list);
   const firstStatus = (want) => (s.reg.progress || []).find((e) => e.kind === "status" && e.status === want)?.at || "";
   return {
-    status, inferred, note, priority, unworked, prs: list, build, completedAt: firstStatus("implemented"), retiredAt: firstStatus("retired"), summary: s.reg.summary || s.head.summary || "", webBase: s.resolved ? gitInfo(s.resolved).webBase : "",
+    status, inferred, note, priority, unworked, prs: list, links: refs, build, completedAt: firstStatus("implemented"), retiredAt: firstStatus("retired"), summary: s.reg.summary || s.head.summary || "", webBase: s.resolved ? gitInfo(s.resolved).webBase : "",
     stage: st.stage, stageLabel: st.label, stageIndex: st.index, stageInferred: inferred, stageNote: note, subLabel: subLabelOf(status, list),
     session: s.reg.session || null, progress,
   };
@@ -233,19 +244,26 @@ function projectCwd(s) {
 // and drop chat entries that duplicate them within a minute. Each item carries the agent that was
 // on the plan when it was written (history rows are stamped; chat entries adopt the current one).
 function transcript(s) {
-  const items = s.history.map((h) => ({ at: h.at, role: h.role, kind: h.kind, text: h.text, where: h.where, tag: h.tag, agent: h.agent || null }));
+  const items = s.history.map((h) => ({ at: h.at, role: h.role, kind: h.kind, text: h.text, where: h.where, tag: h.tag, agent: h.agent || null, chatId:h.chatId || "" }));
   for (const c of s.chat) {
-    const twin = items.find((i) => i.role === c.role && (i.text === c.text || (c.kind === "annotation" && i.text && String(c.text).endsWith(i.text))) && (c.kind === "annotation" || Math.abs(new Date(i.at) - new Date(c.at)) < 60e3));
-    if (twin) { if (String(c.at) < String(twin.at)) twin.at = c.at; continue; }
-    items.push({ at: c.at, role: c.role, kind: c.kind || (c.role === "agent" ? "reply" : "message"), text: c.text, agent: null });
+    const twin = items.find((i) => i.role === c.role && (!i.chatId||!c.chatId||i.chatId===c.chatId) && (i.text === c.text || (c.kind === "annotation" && i.text && String(c.text).endsWith(i.text))) && (c.kind === "annotation" || Math.abs(new Date(i.at) - new Date(c.at)) < 60e3));
+    if (twin) { if(c.chatId)twin.chatId=c.chatId; if (String(c.at) < String(twin.at)) twin.at = c.at; continue; }
+    items.push({ at: c.at, role: c.role, kind: c.kind || (c.role === "agent" ? "reply" : "message"), text: c.text, agent: c.agent || null, chatId:c.chatId || "" });
   }
   items.sort((a, b) => String(a.at).localeCompare(String(b.at)));
-  let cur = null;
-  for (const i of items) { if (i.agent && i.agent.id) cur = i.agent; else i.agent = cur; }
+
   return items;
 }
 /** The transcript cut into one group per agent session (a new group when the agent id changes), oldest first. */
 function transcriptGroups(s) {
+  const data=readChats(s.key);
+  if(Object.keys(data.chats).length){
+    const grouped=groupMessages(data,transcript(s));
+    return Object.entries(grouped).filter(([,items])=>items.length).map(([id,items])=>{
+      const c=data.chats[id];return {id,provider:c?.agent?.provider||'',name:c?.title||'Earlier conversation',rec:c?.agent,items,first:items[0].at,last:items.at(-1).at};
+    });
+  }
+
   const groups = [];
   for (const i of transcript(s)) {
     const id = i.agent?.id || "";
@@ -273,7 +291,7 @@ function scanVersions() {
   } catch (e) { console.error("scanVersions:", e.message); }
 }
 let prRefreshRunning = false;
-function refreshPrs(session, { force = false } = {}) {
+async function refreshPrs(session, { force = false } = {}) {
   const slug = session.resolved ? gitInfo(session.resolved).slug : "";
   if (!slug) return { checked: 0, reason: "no GitHub remote for this file" };
   let checked = 0;
@@ -281,20 +299,20 @@ function refreshPrs(session, { force = false } = {}) {
   for (const p of session.plan.prs) {
     const final = p.state === "MERGED" || p.state === "CLOSED";
     const fresh = p.checkedAt && Date.now() - new Date(p.checkedAt).getTime() < PR_FRESH_MS;
-    if (!force && (final || fresh)) continue;
-    const r = ghPrView(slug, p.n);
+    if (!force && ((final && Array.isArray(p.links)) || fresh)) continue;
+    const r = await ghPrView(slug, p.n);
     if (!r) return { checked, reason: "gh unavailable or not authenticated" };
     checked++;
     patch.prs[p.n] = r.missing
       ? { source: p.source, missing: true, checkedAt: new Date().toISOString() }
-      : { source: p.source, state: r.state, title: r.title, url: r.url, mergedAt: r.mergedAt, missing: false, checkedAt: new Date().toISOString() };
+      : { source: p.source, state: r.state, title: r.title, url: r.url, mergedAt: r.mergedAt, links:r.links||[], missing: false, checkedAt: new Date().toISOString() };
   }
   if (checked) updateRegistry(session.key, patch);
   return { checked };
 }
-function refreshAllPrs() {
+async function refreshAllPrs() {
   if (prRefreshRunning) return; prRefreshRunning = true;
-  try { for (const s of loadSessions()) if (s.plan.prs.length) refreshPrs(s); } catch (e) { console.error("refreshAllPrs:", e.message); } finally { prRefreshRunning = false; }
+  try { for (const s of loadSessions()) if (s.plan.prs.length) await refreshPrs(s); } catch (e) { console.error("refreshAllPrs:", e.message); } finally { prRefreshRunning = false; }
 }
 /** D11: link plans to the sessions that read or edited them in the last 7 days (source: scan; never displaces a real stamp). */
 let agentScanRunning = false, lastAgentScan = null;
@@ -389,7 +407,10 @@ a{color:var(--acc)}button{font:inherit}.mono{font-family:"IBM Plex Mono",ui-mono
 .shead{display:flex;align-items:center;gap:2px;padding:0 4px 6px}.shead button{background:none;border:0;color:var(--ink3);cursor:pointer;padding:4px 7px;border-radius:6px;font-size:14px;line-height:1;display:inline-flex;align-items:center}.shead button svg{width:15px;height:15px}.shead button:hover{background:var(--hover);color:var(--ink)}.shead .sp{flex:1}
 .side h4{margin:14px 10px 4px;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink3);font-weight:600}
 .nav{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:8px;color:var(--ink2);text-decoration:none;font-size:13px;cursor:pointer;border:1px dashed transparent;list-style:none;min-width:0}.nav::-webkit-details-marker{display:none}.nav:hover{background:var(--hover)}.nav.on{background:var(--accSoft);color:var(--acc);font-weight:600}.nav .n{margin-left:auto;font-size:11px;color:var(--ink3);font-variant-numeric:tabular-nums;flex:0 0 auto}.nav.on .n{color:var(--acc)}.nav svg{width:16px;height:16px;flex:0 0 auto;color:var(--ink3)}.nav.on svg{color:var(--acc)}.nav .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.nav.over{border-color:var(--acc);background:var(--accSoft)}.nav.nodrop{opacity:.35}
+.nav.over{border-color:var(--acc);background:var(--accSoft)}
+html,body,.side,.tw{scrollbar-width:none}html::-webkit-scrollbar,body::-webkit-scrollbar,.side::-webkit-scrollbar,.tw::-webkit-scrollbar{display:none}.side{overflow-x:hidden}
+[data-drop]{position:relative}[data-drop].insert-before::before,[data-drop].insert-after::after{content:"";position:absolute;left:8px;right:8px;height:2px;background:var(--acc);z-index:4;pointer-events:none}[data-drop].insert-before::before{top:0}[data-drop].insert-after::after{bottom:0}
+.plan-view-tabs{display:flex;gap:8px;margin:16px 0}.plan-view-tabs button{border:1px solid var(--rule);border-radius:7px;padding:7px 13px;background:var(--surface);color:var(--ink);cursor:pointer}.plan-view-tabs button[aria-selected=true]{background:var(--accSoft);color:var(--acc)}.plan-preview{width:100%;height:calc(100vh - 175px);border:1px solid var(--rule);border-radius:8px;background:var(--surface)}.plan-links{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}.plan-links a{overflow-wrap:anywhere}.chat-bar{padding:12px 0;border-bottom:1px solid var(--rule);margin-bottom:14px}.chat-bar .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.nav.nodrop{opacity:.35}
 .proj>summary .fo{display:none}.proj[open]>summary .fo{display:block}.proj[open]>summary .fc{display:none}.proj[draggable] summary{cursor:pointer}
 .navwrap{position:relative}.nav.plan{padding:4px 10px 4px 34px;font-size:12.5px;color:var(--ink2);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.nav.plan.on{font-weight:600}.hid{display:none!important}
 button.more{background:none;border:0;color:var(--acc);font-size:12.5px;padding:8px 12px;cursor:pointer;text-align:left}button.more:hover{text-decoration:underline}.side button.more{padding:3px 10px 3px 34px;font-size:12px}
@@ -442,6 +463,9 @@ pre.pane{background:#1a1d21;color:#e8e6e1;padding:10px 12px;border-radius:8px;fo
 details.fold{margin:8px 0}details.fold>summary{cursor:pointer;color:var(--acc);font-size:13px;list-style:none}details.fold>summary::-webkit-details-marker{display:none}details.fold>summary::before{content:"\\203A";display:inline-block;margin-right:6px;transition:transform .12s}details.fold[open]>summary::before{transform:rotate(90deg)}details.fold .in{margin:8px 0 0}
 .errpage{max-width:640px;margin:60px auto;padding:0 20px}.errpage h1{font-size:22px}.errpage p{font-size:15px}
 `;
+const EMBED_CSS = `main.embed{padding:8px 12px 30px;max-width:none}main.embed .fbar{margin:4px 0 8px}main.embed .grp{margin:14px 0 4px}main.embed .grp.mm-other{margin-top:22px;color:var(--ink3)}
+.mm-mark{display:block;font-size:11.5px;font-weight:500;color:var(--ink3);line-height:1.3}.mm-mark:empty{display:none}.mm-mark.here{color:var(--ok,#15803d)}.mm-mark.held{color:var(--ink3)}
+main.embed col[data-col="actions"]{width:190px!important}main.embed td.acts{white-space:normal}.mm-use{white-space:normal;text-align:left;line-height:1.25;max-width:150px}.mm-use:disabled{opacity:.55;cursor:default}.mm-reason{color:#b45309;margin:0 0 6px}`;
 const CLIENT_JS = `
 (function(){
   var KEY="lavish-home:theme",W="lavish-home:cols",COLK="lavish-home:columns",SORTK="lavish-home:sort",SIDEW="lavish-home:side",SIDEH="lavish-home:side-hidden",PROJK="lavish-home:proj";
@@ -545,27 +569,49 @@ const CLIENT_JS = `
   /* popovers with many values get a type-to-filter box */
   document.querySelectorAll(".pop").forEach(function(p){var links=p.querySelectorAll("a");if(links.length<9)return;var f=document.createElement("input");f.type="search";f.className="cbi";f.placeholder="Type to filter";f.style.margin="2px 4px 6px";p.insertBefore(f,p.firstChild);f.addEventListener("input",function(){var s=f.value.toLowerCase();links.forEach(function(a){a.style.display=!s||a.textContent.toLowerCase().indexOf(s)!==-1?"":"none";});});f.addEventListener("keydown",function(e){if(e.key==="Enter"){var v=[].filter.call(links,function(a){return a.style.display!=="none";});if(v.length===1)location.href=v[0].href;}});});
   /* drag and drop (PUT /api/layout): a plan (row or sidebar) onto a tag = tag it; a sidebar plan onto another plan of the same project = reorder; a project onto a project = reorder */
-  var dragging=null;
-  document.querySelectorAll("[data-drag]").forEach(function(el){el.addEventListener("dragstart",function(e){dragging=el.dataset.drag;e.dataTransfer.setData("text/plain",dragging);e.dataTransfer.effectAllowed="move";el.classList.add("drag");e.stopPropagation();});
-    el.addEventListener("dragend",function(){el.classList.remove("drag");dragging=null;document.querySelectorAll(".over").forEach(function(t){t.classList.remove("over");});});});
-  function canDrop(src,target){if(!src||!target)return false;if(src.indexOf("plan:")===0)return target.indexOf("tag:")===0||(target.indexOf("planslot:")===0&&target.slice(9)!==src.slice(5));if(src.indexOf("project:")===0)return target.indexOf("project:")===0&&target!==src;return false;}
-  document.querySelectorAll("[data-drop]").forEach(function(t){t.addEventListener("dragover",function(e){if(!canDrop(dragging,t.dataset.drop))return;e.preventDefault();e.stopPropagation();e.dataTransfer.dropEffect="move";t.classList.add("over");});
-    t.addEventListener("dragleave",function(){t.classList.remove("over");});
-    t.addEventListener("drop",function(e){e.preventDefault();e.stopPropagation();t.classList.remove("over");var src=e.dataTransfer.getData("text/plain")||dragging;var target=t.dataset.drop;if(!canDrop(src,target))return;var body=null;
-      if(src.indexOf("plan:")===0&&target.indexOf("tag:")===0)body={op:"tag",key:src.slice(5),tid:target.slice(4)};
-      else if(src.indexOf("plan:")===0){var wa=document.querySelector('.side .navwrap[data-drop="planslot:'+src.slice(5)+'"]'),wb=t;if(!wa||wa.parentNode!==wb.parentNode)return;wa.parentNode.insertBefore(wa,wb);body={op:"order-plans",project:wa.parentNode.dataset.proj,keys:[].map.call(wa.parentNode.querySelectorAll(".navwrap"),function(w){return w.dataset.drop.slice(9);})};}
-      else{var pa=document.querySelector('details.proj[data-proj="'+CSS.escape(src.slice(8))+'"]'),pb=t.closest("details.proj");if(!pa||!pb||pa===pb)return;pb.parentNode.insertBefore(pa,pb);body={op:"order-projects",names:[].map.call(document.querySelectorAll("details.proj"),function(d){return d.dataset.proj;})};}
-      fetch("/api/layout",{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify(body)}).then(function(r){return r.json();}).then(function(j){if(j.error){alert(j.error);return;}
-        Object.keys(j.counts||{}).forEach(function(id){document.querySelectorAll('[data-count="'+id+'"]').forEach(function(n){n.textContent=j.counts[id];});});
-        if(body.op==="tag"){var tr=document.querySelector('tr[data-key="'+body.key+'"]');if(tr){var cell=tr.querySelector('td[data-col="tags"]');if(cell)cell.innerHTML=j.tagsHtml||"";}}
-        else location.reload();
-      }).catch(function(){alert("Could not save: the home page did not answer.");});});});
+  var dragging=null,dropSide="before",savingOrder=false;
+  function clearDrop(){document.querySelectorAll(".over,.insert-before,.insert-after").forEach(function(t){t.classList.remove("over","insert-before","insert-after");});}
+  document.querySelectorAll("[data-drag]").forEach(function(el){el.addEventListener("dragstart",function(e){if(savingOrder){e.preventDefault();return;}dragging=el.dataset.drag;e.dataTransfer.setData("text/plain",dragging);e.dataTransfer.effectAllowed="move";el.classList.add("drag");e.stopPropagation();});el.addEventListener("dragend",function(){el.classList.remove("drag");dragging=null;clearDrop();});});
+  function canDrop(src,target){if(!src||!target)return false;if(src.indexOf("plan:")===0){if(target.indexOf("tag:")===0)return true;if(target.indexOf("planslot:")!==0||target.slice(9)===src.slice(5))return false;var a=document.querySelector('.side .navwrap[data-drop="planslot:'+src.slice(5)+'"]'),b=document.querySelector('.side .navwrap[data-drop="'+target+'"]');return !!(a&&b&&a.parentNode===b.parentNode);}return src.indexOf("project:")===0&&target.indexOf("project:")===0&&target!==src;}
+  document.querySelectorAll("[data-drop]").forEach(function(t){
+    t.addEventListener("dragover",function(e){if(!canDrop(dragging,t.dataset.drop))return;e.preventDefault();e.stopPropagation();e.dataTransfer.dropEffect="move";clearDrop();var r=t.getBoundingClientRect();dropSide=e.clientY<r.top+r.height/2?"before":"after";t.classList.add(t.dataset.drop.indexOf("tag:")===0?"over":"insert-"+dropSide);});
+    t.addEventListener("dragleave",function(e){if(!t.contains(e.relatedTarget))t.classList.remove("over","insert-before","insert-after");});
+    t.addEventListener("drop",function(e){e.preventDefault();e.stopPropagation();var side=dropSide;clearDrop();var src=e.dataTransfer.getData("text/plain")||dragging,target=t.dataset.drop;if(!canDrop(src,target)||savingOrder)return;var body=null,moved=null,oldParent=null,oldNext=null;
+      if(target.indexOf("tag:")===0)body={op:"tag",key:src.slice(5),tid:target.slice(4)};
+      else{var wa=src.indexOf("plan:")===0?document.querySelector('.side .navwrap[data-drop="planslot:'+src.slice(5)+'"]'):document.querySelector('details.proj[data-proj="'+CSS.escape(src.slice(8))+'"]');var wb=src.indexOf("plan:")===0?t:t.closest("details.proj");if(!wa||!wb)return;moved=wa;oldParent=wa.parentNode;oldNext=wa.nextSibling;oldParent.insertBefore(wa,side==="before"?wb:wb.nextSibling);
+        body=src.indexOf("plan:")===0?{op:"order-plans",project:oldParent.dataset.proj,keys:[].map.call(oldParent.querySelectorAll(".navwrap"),function(w){return w.dataset.drop.slice(9);})}:{op:"order-projects",names:[].map.call(document.querySelectorAll("details.proj"),function(d){return d.dataset.proj;})};}
+      savingOrder=true;fetch("/api/layout",{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify(body)}).then(function(r){if(!r.ok)throw new Error("Could not save order");return r.json();}).then(function(j){if(j.error)throw new Error(j.error);Object.keys(j.counts||{}).forEach(function(id){document.querySelectorAll('[data-count="'+id+'"]').forEach(function(n){n.textContent=j.counts[id];});});if(body.op!=="tag")location.reload();}).catch(function(err){if(moved)oldParent.insertBefore(moved,oldNext);alert(err.message);}).finally(function(){savingOrder=false;});
+    });
+  });
+  document.querySelectorAll('[data-plan-view]').forEach(function(button){button.addEventListener('click',function(){var html=button.dataset.planView==='html';document.getElementById('planInformation').hidden=html;var preview=document.getElementById('planHtmlPreview');preview.hidden=!html;if(html&&!preview.src)preview.src=preview.dataset.src;document.querySelectorAll('[data-plan-view]').forEach(function(b){b.setAttribute('aria-selected',String(b===button));});});});
+
 })();`;
 const FONTS = `<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">`;
-const page = (title, crumb, body, serverUp, { pills = "", sidebar = "", layout = null, view = "", key = "", wide = false } = {}) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title>${FONTS}<style>${CSS}</style><script>try{var t=localStorage.getItem("lavish-home:theme");if(t)document.documentElement.setAttribute("data-theme",t);if(localStorage.getItem("lavish-home:side-hidden")==="1"||localStorage.getItem("lavish-home:side-hidden")==='"1"')document.documentElement.classList.add("nos");}catch(e){}</script></head><body${view ? ` data-view="${esc(view)}"` : ""}${key ? ` data-key="${esc(key)}"` : ""}>
+/**
+ * Manager Marcus's embed mode (phase 12, D1): the index framed in its page, with no top bar, no sidebar and no
+ * crumbs; the row's actions are one button, and a small inline script marks the rows the page tells it about
+ * (mm:held) and posts the chosen plan to the page (lavish:pick). Both only with the origin the frame's URL names,
+ * and only a loopback one: anything else leaves the buttons disabled. No cookie, no state.
+ */
+const EMBED_ORIGIN = /^http:\/\/(127\.0\.0\.1|localhost):\d{1,5}$/;
+/** A value for an inline <script>: JSON, with every character that could end the script element or break a JS string escaped (Q1). */
+const jsValue = (v) => JSON.stringify(v).replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+// `origin` reaches this template only after EMBED_ORIGIN accepted it (renderIndex); anything else is "" here and the buttons stay off.
+const embedScript = ({ origin, ok }) => `(function(){var ORIGIN=${jsValue(ok ? origin : "")},OK=${ok ? "true" : "false"},held={},ws="";
+function mark(){document.querySelectorAll("tr[data-key]").forEach(function(tr){var k=tr.dataset.key,h=held[k],b=tr.querySelector("button.mm-use"),m=tr.querySelector(".mm-mark");if(!b)return;
+ if(!m){m=document.createElement("span");m.className="mm-mark";var t=tr.querySelector("td.name .hc")||tr.querySelector("td.name");if(t)t.appendChild(m);}
+ if(h&&ws&&h.workspaceId===ws){m.textContent="in this workspace";m.className="mm-mark here";b.textContent="In this workspace";b.disabled=true;b.title="This plan is already in the workspace you are choosing for";}
+ else if(h){m.textContent="held by "+h.title;m.className="mm-mark held";b.textContent="Move here\u2026 \u00b7 held by "+h.title;b.disabled=!OK;b.title="Held by "+h.title+": choosing it moves it to this workspace after you confirm";}
+ else{m.textContent="";m.className="mm-mark";b.textContent="Use here";b.disabled=!OK;b.title=OK?"Attach this plan to the workspace":b.title;}});}
+if(OK){addEventListener("message",function(e){if(e.origin!==ORIGIN||!e.data||e.data.type!=="mm:held")return;held=e.data.held&&typeof e.data.held==="object"?e.data.held:{};ws=String(e.data.workspaceId||"");mark();});
+ document.querySelectorAll("button.mm-use").forEach(function(b){b.addEventListener("click",function(){parent.postMessage({type:"lavish:pick",key:b.dataset.key,title:b.dataset.title,project:b.dataset.project},ORIGIN);});});}
+mark();})();`;
+const page = (title, crumb, body, serverUp, { pills = "", sidebar = "", layout = null, view = "", key = "", wide = false, embed = null } = {}) => embed ? `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title>${FONTS}<style>${CSS}${EMBED_CSS}</style><script>try{var t=localStorage.getItem("lavish-home:theme");if(t)document.documentElement.setAttribute("data-theme",t);}catch(e){}</script></head><body data-view="${esc(view)}" data-embed="mm">
+<main class="embed">${body}</main>
+<script>window.__LAYOUT=${jsValue(layout ? { tags: layout.tags } : { tags: {} })};window.__MODELS=${jsValue(modelsForClient())};window.__COLS=${jsValue(COLUMNS.map((c) => ({ k: c.k, on: c.on })))};${CLIENT_JS}</script><script>${embedScript(embed)}</script></body></html>` : `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title>${FONTS}<style>${CSS}</style><script>try{var t=localStorage.getItem("lavish-home:theme");if(t)document.documentElement.setAttribute("data-theme",t);if(localStorage.getItem("lavish-home:side-hidden")==="1"||localStorage.getItem("lavish-home:side-hidden")==='"1"')document.documentElement.classList.add("nos");}catch(e){}</script></head><body${view ? ` data-view="${esc(view)}"` : ""}${key ? ` data-key="${esc(key)}"` : ""}>
 <div class="top">${sidebar ? `<button class="tbtn" id="sideShow" type="button" title="Show the sidebar">☰</button>` : ""}<a class="logo" href="/">Lavish</a><span class="crumb">${esc(crumb)}</span><span class="sp"></span>${sidebar && view ? '<div class="search"><span aria-hidden="true">⌕</span><input id="q" type="search" placeholder="Search plans" autocomplete="off"></div>' : ""}${pills}<button class="tbtn" id="themeToggle" type="button" title="Light / dark (follows the system until you pick; saved in this browser)" aria-label="Toggle theme">◐</button><span class="pill lv-pill ${serverUp ? "on" : "off"}" title="The Lavish server on :${process.env.LAVISH_AXI_PORT || 4387}"><span class="ld"></span>lavish ${serverUp ? "up" : "down"}</span></div>
 ${sidebar ? `<div class="shell"><aside class="side">${sidebar}<div class="rzs" title="Drag to resize the sidebar"></div></aside><main>${body}</main></div>` : `<main style="${wide ? "padding:0" : "max-width:1280px;margin:0 auto"}">${body}</main>`}
-<script>window.__LAYOUT=${JSON.stringify(layout ? { tags: layout.tags } : { tags: {} }).replace(/<\//g, "<\\/")};window.__MODELS=${JSON.stringify(modelsForClient()).replace(/<\//g, "<\\/")};window.__COLS=${JSON.stringify(COLUMNS.map((c) => ({ k: c.k, on: c.on })))};${CLIENT_JS}</script></body></html>`;
+<script>window.__LAYOUT=${JSON.stringify(layout ? { tags: layout.tags } : { tags: {} }).replace(/<\//g, "<\\/")};window.__MODELS=${JSON.stringify(modelsForClient()).replace(/<\//g, "<\\/")};window.__COLS=${JSON.stringify(COLUMNS.map((c) => ({ k: c.k, on: c.on })))};${CLIENT_JS}</script><script src="/chat-panel.client.js"></script></body></html>`;
 const errorPage = (title, message, { back = "/", extra = "" } = {}, serverUp = true) => page(title, title, `<div class="errpage"><h1>${esc(title)}</h1><p>${esc(message)}</p>${extra}<p class="meta"><a class="a" href="${esc(back)}">← Back</a></p></div>`, serverUp);
 
 function planChip(plan) {
@@ -620,7 +666,7 @@ function renderSidebar(sessions, layout, { view = "", agent = "", current = "" }
   const live = sessions.filter((s) => !["retired", "superseded"].includes(s.plan.status));
   const projNav = orderedProjects(sessions, layout).map((p) => {
     const plans = orderedPlans(live.filter((s) => s.project === p), layout, p);
-    return `<details class="proj" open data-proj="${esc(p)}"><summary class="nav ${view === `project:${p}` ? "on" : ""}" data-drag="project:${esc(p)}" data-drop="project:${esc(p)}" draggable="true" title="${esc(p)}: click to collapse; drag onto another project to reorder">${ICON.folder}${ICON.folderOpen}<span class="t">${esc(p)}</span><span class="n">${plans.length}</span></summary>
+    return `<details class="proj" open data-proj="${esc(p)}"><summary class="nav ${view === `project:${p}` ? "on" : ""}" data-drag="project:${esc(p)}" data-drop="project:${esc(p)}" draggable="true" title="${esc(p)}: click to collapse; drag above or below a project to reorder">${ICON.folder}${ICON.folderOpen}<span class="t">${esc(p)}</span><span class="n">${plans.length}</span></summary>
       ${plans.map((s) => `<div class="navwrap hc" data-drop="planslot:${s.key}"><a class="nav plan ${current === s.key ? "on" : ""}" href="/session/${s.key}" data-key="${s.key}" data-drag="plan:${s.key}" draggable="true">${esc(s.title)}</a>${hoverCard(s)}</div>`).join("")}
       ${plans.length > 5 ? `<button class="more" type="button">Show more</button>` : ""}</details>`;
   }).join("");
@@ -636,11 +682,16 @@ function renderSidebar(sessions, layout, { view = "", agent = "", current = "" }
 function renderIndex(sessions, q, serverUp, layout) {
   const tag = q.get("tag") || "", project = q.get("project") || "";
   const status = q.get("status") || "", plan = q.get("plan") || "", prio = q.get("prio") || "", stage = q.get("stage") || "", agent = q.get("agent") || "";
+  // Embed mode (Manager Marcus): `project` is the group shown first, not a filter; `origin` is the page the buttons may answer.
+  // The origin is checked here, before anything renders it: a value that is not a loopback page origin never reaches a
+  // template or a script (Q1); the page says so in plain text, and every button stays disabled.
+  const embedOrigin = q.get("origin") || "";
+  const embed = q.get("embed") === "mm" ? (EMBED_ORIGIN.test(embedOrigin) ? { origin: embedOrigin, ok: true } : { origin: "", ok: false, given: embedOrigin }) : null;
   const showRetired = plan === "retired" || plan === "superseded" || stage === "parked";
   const tags = tagList(layout, new Set(sessions.map((s) => s.key)));
   const tagName = tag ? layout.tags[tag]?.name || "Tag" : "";
   const shown = sessions.filter((s) => (!tag || s.tags.some((t) => t.id === tag))
-    && (!project || s.project === project)
+    && (embed || !project || s.project === project)
     && (!status || (status === "orphan" ? !s.exists : status === "stale" ? s.stale : s.status === status))
     && (!agent || (agent === "terminal" ? s.agent.state === "active" && s.agent.terminal : agent === "active" ? s.agent.state === "active" && !s.agent.terminal : agent === "any-active" ? s.agent.state === "active" : s.agent.state === agent))
     && (!plan || (plan === "unworked" ? s.plan.unworked : s.plan.status === plan))
@@ -648,10 +699,12 @@ function renderIndex(sessions, q, serverUp, layout) {
     && (!stage || s.plan.stage === stage)
     && (showRetired || !["retired", "superseded"].includes(s.plan.status)));
   const current = { ...(tag ? { tag } : {}), ...(project ? { project } : {}), ...(status ? { status } : {}), ...(agent ? { agent } : {}), ...(plan ? { plan } : {}), ...(prio ? { prio } : {}), ...(stage ? { stage } : {}) };
-  const keep = (k, v, drop = []) => { const c = { ...current, [k]: v }; for (const d of drop) delete c[d]; return new URLSearchParams(c).toString().replace(/[^=&]+=(&|$)/g, "").replace(/&$/, ""); };
+  // Every link inside the embed keeps the embed parameters (project and origin included, so the frame stays what it is).
+  const pinned = embed ? { embed: "mm", project, origin: embed.origin } : {};
+  const keep = (k, v, drop = []) => { const c = { ...pinned, ...current, [k]: v }; for (const d of drop) delete c[d]; return new URLSearchParams(c).toString().replace(/[^=&]+=(&|$)/g, "").replace(/&$/, ""); };
   const filtered = Boolean(status || agent || plan || prio || stage);
-  const home = !tag && !project && !filtered;
-  const view = tag ? `tag:${tag}` : project ? `project:${project}` : filtered ? "filtered" : "all";
+  const home = !tag && (embed || !project) && !filtered;
+  const view = tag ? `tag:${tag}` : project && !embed ? `project:${project}` : filtered ? "filtered" : "all";
   // Drive-style filter buttons: each opens a popover of today's chips with the same query keys; nothing moves when one opens.
   const FILTERS = [
     { k: "agent", label: "Agent", cur: agent, opts: [["", "any"], ["none", "not connected"], ["active", "active in an editor"], ["terminal", "in a terminal"], ["any-active", "any active"], ["ended", "ended"]] },
@@ -663,8 +716,10 @@ function renderIndex(sessions, q, serverUp, layout) {
   ];
   const fbtn = (f) => { const curLabel = (f.opts.find((o) => o[0] === f.cur) || [])[1] || ""; return `<details class="fbtn ${f.cur ? "on" : ""}"><summary>${esc(f.label)}${f.cur ? ` · ${esc(curLabel)}` : ""} <span class="ch">▾</span></summary><div class="pop">${f.opts.map(([v, label]) => `<a class="${f.cur === v ? "on" : ""}" href="/?${keep(f.k, v)}">${esc(label)}</a>`).join("")}</div></details>`; };
   const colsBtn = `<details class="fbtn" style="margin-left:auto"><summary>Columns <span class="ch">▾</span></summary><div class="pop right" id="colsPop"><div class="h">Shown</div>${COLUMNS.map((c) => `<label class="${c.fixed ? "fixed" : ""}"><input type="checkbox" value="${c.k}"${c.on ? " checked" : ""}${c.fixed ? " disabled" : ""}> ${esc(c.label)}</label>`).join("")}</div></details>`;
-  const fbar = `<div class="fbar">${FILTERS.map(fbtn).join("")}${Object.keys(current).length ? `<a class="a" href="/" style="font-size:12.5px">Clear</a>` : ""}${colsBtn}</div>`;
+  const clearHref = embed ? `/?${new URLSearchParams(pinned).toString()}` : "/";
+  const fbar = `<div class="fbar">${FILTERS.map(fbtn).join("")}${Object.keys(current).filter((k) => !(embed && k === "project")).length ? `<a class="a" href="${esc(clearHref)}" style="font-size:12.5px">Clear</a>` : ""}${colsBtn}</div>`;
   const back = encodeURIComponent("/?" + new URLSearchParams(current).toString());
+  if (embed) return renderEmbed({ shown, layout, fbar, cols: null, project, embed, serverUp, view });
   const sidebar = renderSidebar(sessions, layout, { view, agent });
   const crumbs = tag ? `<div class="crumbs"><a href="/">All plans</a> › <b>${esc(tagName)}</b></div>` : project ? `<div class="crumbs"><a href="/">All plans</a> › <b>${esc(project)}</b></div>` : `<div class="crumbs"><b>All plans</b>${filtered ? " <span>· filtered</span>" : ""}</div>`;
   const tagRow = tag ? `<p class="meta" style="margin:0 0 8px">${shown.length} plan${shown.length === 1 ? "" : "s"} · <form class="inline" method="post" action="/tags/${esc(tag)}" onsubmit="var v=prompt('Rename tag',this.name.value);if(v===null)return false;this.name.value=v;return true"><input type="hidden" name="op" value="rename"><input type="hidden" name="name" value="${esc(tagName)}"><button class="a" type="submit">Rename</button></form><form class="inline" method="post" action="/tags/${esc(tag)}" onsubmit="return confirm('Delete this tag? It comes off every plan; nothing else changes.')"><input type="hidden" name="op" value="delete"><button class="a" type="submit">Delete tag</button></form></p>` : "";
@@ -683,6 +738,30 @@ function renderIndex(sessions, q, serverUp, layout) {
     body += `</tbody></table></div>${home && list.length > 5 ? `<button class="more" type="button" data-grp="${esc(gid)}">Show ${Math.min(10, list.length - 5)} more</button>` : ""}`;
   }
   return page(tag ? `${tagName} · Lavish` : project ? `${project} · Lavish` : "Lavish home", tag ? tagName : project || "all plans", body, serverUp, { pills, sidebar, layout, view });
+}
+/** The index in embed mode: the given project's group first, "Other projects" after it, the rows with one button each. */
+function renderEmbed({ shown, layout, fbar, project, embed, serverUp, view }) {
+  const names = orderedProjects(shown, layout);
+  const first = project && names.includes(project) ? [project] : [];
+  const rest = names.filter((n) => n !== project);
+  const cols = `<colgroup>${COLUMNS.map((c) => `<col data-col="${c.k}" data-w="${c.w}" style="width:${c.on ? c.w : "0"}">`).join("")}</colgroup>`;
+  const head = `<thead><tr>${COLUMNS.map((c) => `<th data-col="${c.k}"${c.nosort ? " data-nosort" : ""} class="${c.on ? "" : "off"}">${esc(c.label)}${c.k !== "actions" ? '<span class="rz"></span>' : ""}</th>`).join("")}</tr></thead>`;
+  const group = (g) => {
+    const list = orderedPlans(shown.filter((s) => s.project === g), layout, g);
+    const gid = g.replace(/[^a-z0-9]/gi, "-").toLowerCase();
+    let out = `<div class="grp"><span>${esc(g)}</span><span>${list.length} plan${list.length === 1 ? "" : "s"}${view === "all" && list.length > 5 ? " · newest 5" : ""}</span></div><div class="tw"><table data-cols="1" data-grp="${esc(gid)}">${cols}${head}<tbody>`;
+    list.forEach((s, i) => { out += row(s, "", layout, { i, hide: view === "all" && i >= 5, embed }); });
+    return out + `</tbody></table></div>${view === "all" && list.length > 5 ? `<button class="more" type="button" data-grp="${esc(gid)}">Show ${Math.min(10, list.length - 5)} more</button>` : ""}`;
+  };
+  // The rejected value is not echoed, not even escaped: nothing of it reaches the page.
+  let body = embed.ok ? "" : `<p class="meta mm-reason">The buttons are off: this page was framed with ${embed.given ? "an origin" : "no origin"}, which is not a local Manager Marcus page. Open it from the Manager Marcus page.</p>`;
+  body += fbar;
+  if (!shown.length) body += `<p class="empty">Nothing here.</p>`;
+  if (project && !first.length && shown.length) body += `<p class="meta">No plans in ${esc(project)} yet.</p>`;
+  body += first.map(group).join("");
+  if (first.length && rest.length) body += `<div class="grp mm-other"><span>Other projects</span></div>`;
+  body += rest.map(group).join("");
+  return page("Lavish home", "plans", body, serverUp, { layout, view, embed });
 }
 /** Plan status cell: the word in effect, and a select that appears on hover or focus. */
 function statusCell(s, back) {
@@ -709,7 +788,7 @@ function rowMenu(s, back, layout) {
   return [
     s.exists ? `<form method="post" action="/open/${s.key}"><button type="submit">${s.status === "ended" ? "Reopen in Lavish" : "Open in Lavish"}</button></form>` : "",
     s.exists ? `<a href="/session/${s.key}#launch">New session…</a>` : "",
-    s.exists ? `<form method="post" action="/restart/${s.key}" onsubmit="return confirm('Restart: end the Lavish session, close its tabs, and start a NEW agent session on this plan (${esc((s.reg.launch || {}).provider || s.agent.provider || "claude")}, ${esc(agentModel(s) || "default model")})?')"><button type="submit" title="${live ? `Refused while ${esc(s.agent.name)} is live: end it first` : "End the Lavish session and its tabs, then start a fresh agent session that reopens this plan"}">Restart${live ? ' <span class="k">live: refuses</span>' : ""}</button></form>` : "",
+    s.exists ? `<a href="/session/${s.key}">New chat…</a>` : "",
     `<a href="/session/${s.key}">Log</a>`,
     `<details><summary>Tag <span class="k">›</span></summary><div class="sub">${tagItems}</div></details>`,
     "<hr>",
@@ -718,22 +797,24 @@ function rowMenu(s, back, layout) {
     s.plan.status !== "retired" ? `<form method="post" action="/status/${s.key}?back=${back}"><input type="hidden" name="status" value="retired"><button type="submit" class="danger" title="Park or abandon this plan (hidden from the default view)">Retire</button></form>` : `<form method="post" action="/status/${s.key}?back=${back}"><input type="hidden" name="status" value=""><button type="submit">Unretire (infer status)</button></form>`,
   ].join("");
 }
-function row(s, back = "", layout, { i = 0, hide = false } = {}) {
+function row(s, back = "", layout, { i = 0, hide = false, embed = null } = {}) {
   const p = s.plan, b = p.build, launch = s.reg.launch || {};
-  const resume = s.exists && s.agent.state !== "none" ? `<form class="inline" method="post" action="/connect/${s.key}" title="${esc(s.agent.state === "active" ? (s.agent.terminal ? "Bring its terminal forward and open the plan in Lavish" : `Live in ${s.agent.entrypointLabel}: opens the plan in Lavish only`) : `Resume ${s.agent.name} in a terminal (${agentModel(s) || "default model"}, ${launch.effort || "default effort"}) and open the plan in Lavish`)}"><input type="hidden" name="model" value="${esc(launch.model || "")}"><input type="hidden" name="effort" value="${esc(launch.effort || "")}"><button class="a" type="submit">Resume</button></form>` : "";
+  // Embed mode: the title is text (a link would navigate the frame away), the status is its word, and the actions are one button the frame's script drives.
+  const use = embed ? `<button class="b q mm-use" type="button" data-key="${s.key}" data-title="${esc(s.title)}" data-project="${esc(s.project)}"${embed.ok ? "" : ' disabled title="Framed without a local Manager Marcus origin: nothing can be chosen here"'}>Use here</button>` : "";
+  const resume = !embed && s.exists && s.agent.state !== "none" ? `<form class="inline" method="post" action="/connect/${s.key}" title="${esc(s.agent.state === "active" ? (s.agent.terminal ? "Bring its terminal forward and open the plan in Lavish" : `Live in ${s.agent.entrypointLabel}: opens the plan in Lavish only`) : `Resume ${s.agent.name} in a terminal (${agentModel(s) || "default model"}, ${launch.effort || "default effort"}) and open the plan in Lavish`)}"><input type="hidden" name="model" value="${esc(launch.model || "")}"><input type="hidden" name="effort" value="${esc(launch.effort || "")}"><button class="a" type="submit">Resume</button></form>` : "";
   const view = s.exists ? `<a class="a" href="/view/${s.key}/" target="_blank" rel="noopener" title="Read the plan as it is on disk: no Lavish chrome, no session change">View</a>` : "";
   const reviews = `${s.agentMsgs} ${s.agentMsgs === 1 ? "reply" : "replies"} · ${s.userSent} sent${s.privateNotes ? ` · ${s.privateNotes} private` : ""}`;
   const cells = {
-    plan: `<div class="hc"><div class="t"><a href="/session/${s.key}">${esc(s.title)}</a><span class="vn" title="${s.versionCount || 0} saved versions">v${s.versionCount || 0}</span>${p.priority === "high" ? '<span class="prio high">high</span>' : ""}${!s.exists ? '<span class="st orphan">missing</span>' : ""}</div>${hoverCard(s)}</div>`,
-    status: statusCell(s, back),
+    plan: `<div class="hc"><div class="t">${embed ? `<span class="pt">${esc(s.title)}</span>` : `<a href="/session/${s.key}">${esc(s.title)}</a>`}<span class="vn" title="${s.versionCount || 0} saved versions">v${s.versionCount || 0}</span>${p.priority === "high" ? '<span class="prio high">high</span>' : ""}${!s.exists ? '<span class="st orphan">missing</span>' : ""}</div>${hoverCard(s)}</div>`,
+    status: embed ? `<div class="sw">${planChip(s.plan)}</div>` : statusCell(s, back),
     build: dotWord(b.tone, b.label, b.why, false),
     session: agentCell(s),
     modified: `<span class="num" title="${esc(fmt(s.updated))}">${fmtDay(s.updated)}</span>`,
     added: `<span class="num" title="${esc(s.added ? fmt(s.added) : "unknown")}">${s.added ? fmtDay(s.added).replace(/^today .*/, "today") : "–"}</span>`,
-    actions: `${view}${resume}<button class="dots" type="button" title="More actions (right-click the row does the same)" aria-label="More actions">⋯</button><div class="menu src">${rowMenu(s, back, layout)}</div>`,
+    actions: embed ? use : `${view}${resume}<button class="dots" type="button" title="More actions (right-click the row does the same)" aria-label="More actions">⋯</button><div class="menu src">${rowMenu(s, back, layout)}</div>`,
     tags: tagsCellHtml(s),
     priority: `<span class="prio ${esc(p.priority)}">${esc(p.priority)}</span>`,
-    project: `<a class="a" style="color:var(--ink2)" href="/?project=${encodeURIComponent(s.project)}">${esc(s.project)}</a>`,
+    project: embed ? `<span style="color:var(--ink2)">${esc(s.project)}</span>` : `<a class="a" style="color:var(--ink2)" href="/?project=${encodeURIComponent(s.project)}">${esc(s.project)}</a>`,
     completed: `<span class="num">${p.completedAt ? fmtDay(p.completedAt) : "–"}</span>`,
     retired: `<span class="num">${p.retiredAt ? fmtDay(p.retiredAt) : "–"}</span>`,
     versions: `<span class="num">${s.versionCount || 0}</span>`,
@@ -745,77 +826,7 @@ function row(s, back = "", layout, { i = 0, hide = false } = {}) {
 }
 function shortPath(p) { return p.replace(os.homedir(), "~").replace("/Library/CloudStorage/Dropbox-Personal/Development/", "/…/"); }
 
-/* ── launch forms + agent block (plan page) ──────────────────────────────── */
-/** Recent folders for the New-session combobox: the plan's own first, then the terminals this page started and the agents' cwds. */
-function recentFolders(s) {
-  const out = []; const push = (p) => { if (p && existsSync(p) && !out.includes(p)) out.push(p); };
-  push(projectCwd(s));
-  for (const t of readTerminals()) push(t.cwd);
-  for (const x of [s.reg.agent, ...s.agents]) if (x) push(x.cwd);
-  return out.slice(0, 8);
-}
-const knownModel = (provider, id) => readModels()[provider === "codex" ? "codex" : "claude"].models.some((m) => m.id === id);
-const modelOpts = (provider, sel) => { const M = readModels()[provider === "codex" ? "codex" : "claude"]; return `<option value=""${!sel ? " selected" : ""}>Default</option>${M.models.map((m) => `<option value="${esc(m.id)}"${m.id === sel ? " selected" : ""}>${esc(m.name)}</option>`).join("")}`; };
-const effortOpts = (provider, sel) => { const M = readModels()[provider === "codex" ? "codex" : "claude"]; return `<option value=""${!sel || sel === "default" ? " selected" : ""}>Default</option>${M.efforts.map((e) => `<option value="${esc(e)}"${e === sel ? " selected" : ""}>${esc(effortName(e))}</option>`).join("")}`; };
-function launchForms(s, { cwd = "" } = {}) {
-  const l = s.reg.launch || {};
-  const a = s.agent;
-  const provider = l.provider || a.provider || "claude";
-  const freeModel = l.model && l.model !== "default" && !knownModel(provider, l.model) ? l.model : "";
-  const resumeForm = a.state === "none" ? `<p class="meta" style="margin:0 0 4px">No agent has polled this plan yet, so there is nothing to resume. Start a new session below, or run <span class="mono">lavish-poll</span> from the session that is on it.</p>` :
-    `<form class="xform" method="post" action="/connect/${s.key}"><div class="row"><button class="b" type="submit">${a.state === "active" ? (a.terminal ? "Bring the terminal forward" : "Open in Lavish") : "Resume"}</button> ${glyph(a.provider)} <span class="mono">${esc(a.name)}</span>
-    <label>Model <select name="model" data-combo data-free="model_free" data-role="model">${modelOpts(a.provider, knownModel(a.provider, l.model) ? l.model : "")}</select><input type="hidden" name="model_free" value="${esc(a.provider === provider ? freeModel : "")}"></label><label>Effort <select name="effort" data-combo data-role="effort">${effortOpts(a.provider, l.effort)}</select></label></div>
-    <p class="meta" style="margin:0">${a.state === "active" ? (a.terminal ? `Already running in tmux ${esc(a.tmuxName)}: nothing new is started. Model and effort apply at the next resume.` : `Live in ${esc(a.entrypointLabel)}: nothing is spawned (a second writer would corrupt its transcript); the plan opens in Lavish.`) : `Ended ${esc(ago(a.lastAt || a.at))}. Starts <span class="mono">tmux new-session -s ${esc(a.tmuxName)}</span> in <span class="mono">${esc(shortPath(a.cwd || ""))}</span> running <span class="mono">${a.provider === "codex" ? "codex resume" : "claude --resume"} ${esc(String(a.id).slice(0, 8))}…</span>, opens Terminal.app on it, then the plan in Lavish. Remembered per plan.`}</p></form>
-    <form class="xform" method="post" action="/restart/${s.key}" onsubmit="return confirm('Restart: end the Lavish session, close its tabs, and start a NEW ${esc(provider)} session on this plan?')"><div class="row"><button class="b q" type="submit"${a.state === "active" ? " disabled" : ""}>Restart</button><span class="meta">${a.state === "active" ? `refused while ${esc(a.name)} is live in ${a.terminal ? "terminal " + esc(a.tmuxName) : esc(a.entrypointLabel)}: end it there first (a second agent on one plan would fight the first)` : `ends the Lavish session and its tabs, then starts a fresh ${esc(provider === "codex" ? "Codex" : "Claude")} session (${esc(modelName(l.model) || "default model")}, ${esc(effortName(l.effort))} effort) whose first prompt reopens this plan; the old session is never resumed`}</span></div></form>`;
-  const folders = recentFolders(s); const start = cwd || projectCwd(s);
-  const newForm = `<form class="xform" method="post" action="/connect/${s.key}?new=1" data-launch><div class="row"><b>New</b> <label>Provider <select name="provider" data-combo data-provider-switch><option value="claude"${provider !== "codex" ? " selected" : ""}>Claude</option><option value="codex"${provider === "codex" ? " selected" : ""}>Codex</option></select></label>
-    <label>Model <select name="model" data-combo data-free="model_free" data-role="model">${modelOpts(provider, knownModel(provider, l.model) ? l.model : "")}</select><input type="hidden" name="model_free" value="${esc(freeModel)}"></label><label>Effort <select name="effort" data-combo data-role="effort">${effortOpts(provider, l.effort)}</select></label></div>
-    <div class="row"><label style="flex:1;display:flex">Folder <select name="cwd_pick" data-combo data-free="cwd" data-role="folder" style="flex:1">${[start, ...folders.filter((f) => f !== start)].map((f) => `<option value="${esc(f)}"${f === start ? " selected" : ""}>${esc(shortPath(f))}</option>`).join("")}</select><input type="hidden" name="cwd" value="${esc(start)}"></label><button class="b q" type="button" data-pick-folder title="Opens the Finder's folder dialog on this Mac (osascript); cancelling leaves the field as it was">Choose in Finder…</button></div>
-    <label style="display:block">Prompt<textarea name="prompt">${esc(l.prompt || defaultNewPrompt(s.resolved || s.file))}</textarea></label>
-    <div class="row"><button class="b" type="submit">Start in a terminal</button><span class="meta">Claude: <span class="mono">claude --session-id &lt;new uuid&gt; …</span> (stamped on the plan at once). Codex: <span class="mono">codex -C &lt;folder&gt; …</span> (its thread is matched by folder on the first poll). Model and effort lists come from <span class="mono">~/.lavish-axi/models.json</span>; type any id for a model that is not listed.</span></div></form>`;
-  return resumeForm + newForm;
-}
-/** The Agent block: state, session (name · provider · model), folder, stamped; Change effort for owned Claude terminals. */
-function agentBlock(s, { effortResult = "", scanResult = "" } = {}) {
-  const a = s.agent;
-  const owned = a.state === "active" && a.terminal && a.provider === "claude";
-  const model = agentModel(s);
-  return `<div class="kv"><span class="k">State</span><span>${a.state === "none" ? '<span class="ag none">not connected</span>' : `<span class="ag ${a.state}${a.source === "scan" ? " scan" : ""}">${a.state === "active" ? '<span class="dot"></span>' : ""}${esc(a.state)}${a.state === "active" ? ` · ${a.terminal ? "terminal " + esc(a.tmuxName) : esc(a.entrypointLabel)}${a.status ? ` · ${esc(a.status)}` : ""}` : ` · ${esc(ago(a.lastAt || a.at))}`}${s.tabs ? ` · ${s.tabs} tab${s.tabs === 1 ? "" : "s"} open` : ""}</span>`}</span>
-  ${a.state !== "none" ? `<span class="k">Session</span><span>${glyph(a.provider)} <span class="mono" title="${esc(a.id)}">${esc(a.name)}</span> · ${esc(a.provider === "codex" ? "Codex" : "Claude")}${model ? ` · ${esc(model)}` : ""}${a.model ? "" : model ? ' <span class="meta" title="the transcript was not found; this is the launch choice remembered for the plan">(remembered)</span>' : ""}${a.guessed ? " · guessed (several live Codex threads in this folder)" : ""}</span><span class="k">Folder</span><span class="mono">${esc(shortPath(a.cwd || ""))}${a.cwd && !existsSync(a.cwd) ? ' <span class="st orphan">missing</span>' : ""}</span><span class="k">Started</span><span>${a.startedAt ? fmt(a.startedAt) : "–"} · stamped by ${esc(a.source)} ${fmt(a.at)}${a.state === "ended" ? ` · would resume as <span class="mono">${esc(a.tmuxName)}</span>` : ""}</span>` : ""}</div>
-  ${effortResult ? `<div class="notice">${esc(effortResult)}</div>` : ""}${scanResult ? `<div class="notice">${esc(scanResult)}</div>` : ""}
-  ${owned ? `<form class="inline" method="post" action="/effort/${s.key}" style="display:block;margin:0 0 10px"><label>Change effort <select name="level" data-combo>${readModels().claude.efforts.map((e) => `<option value="${esc(e)}">${esc(effortName(e))}</option>`).join("")}</select></label> <button class="b q" type="submit" title="Types /effort <level> into the terminal ${esc(a.tmuxName)}, only while it is idle at its prompt, then shows the pane's reply">Type /effort into the terminal</button></form>` : ""}`;
-}
-const ENTRYPOINT_WORD = { "claude-vscode": "VS Code", "claude-cursor": "Cursor", "claude-desktop": "Desktop", cli: "terminal", codex: "Codex" };
-/** Sessions table: every agent that has been on this plan (the current one first). */
-function sessionsTable(s) {
-  const list = [];
-  const seen = new Set();
-  for (const x of [s.reg.agent, ...s.agents]) { if (!x || !x.id || seen.has(x.id)) continue; seen.add(x.id); list.push(x); }
-  if (!list.length) return `<p class="empty">No session has polled this plan yet.</p>`;
-  const rows = list.map((x) => {
-    const live = s.agent.id === x.id ? s.agent : null;
-    const info = sessionInfoOf(x);
-    const model = modelName(info.model) || (live ? modelName((s.reg.launch || {}).model) : "");
-    const active = live && live.state === "active";
-    const where = active ? (live.terminal ? "terminal" : live.entrypointLabel || "editor") : (ENTRYPOINT_WORD[x.entrypoint] || (x.provider === "codex" ? "Codex" : "ended"));
-    const acts = active ? `<form class="inline" method="post" action="/open/${s.key}"><button class="a" type="submit">Open in Lavish</button></form>` : `<form class="inline" method="post" action="/connect/${s.key}?agent=${encodeURIComponent(x.id)}"><button class="a" type="submit" title="Resume this particular session in a terminal">Resume</button></form>`;
-    return `<tr><td class="sess">${glyph(x.provider)} <span class="ag ${x.source === "scan" ? "scan" : ""}" style="display:inline-flex" title="${esc(x.provider)} ${esc(x.id)} · ${esc(x.source || "poll")}${info.file ? ` · ${esc(shortPath(info.file))}` : " · no transcript found"}"><span class="name">${esc(agentLabel(x))}</span></span>${active ? ' <span class="dot"></span>' : ""}</td><td>${model ? esc(model) : '<span class="num" title="no transcript found for this id">–</span>'}</td><td>${esc(where)}</td><td class="num">${info.startedAt ? fmt(info.startedAt) : `<span title="stamped ${esc(fmt(x.at))}">–</span>`}</td><td class="num">${active ? "–" : info.lastAt ? fmt(info.lastAt) : "–"}</td><td class="num">${live && s.tabs ? `${s.tabs} tab${s.tabs === 1 ? "" : "s"}` : "–"}</td><td>${acts}</td></tr>`;
-  }).join("");
-  return `<div class="tw"><table class="tl"><colgroup><col style="width:24%"><col style="width:11%"><col style="width:11%"><col style="width:14%"><col style="width:14%"><col style="width:10%"><col style="width:16%"></colgroup><thead><tr><th>Session</th><th>Model</th><th>Where</th><th title="first line of the transcript">Started</th><th title="last line of the transcript, when not live">Last ended</th><th title="Lavish tabs open on this plan (pinged in the last 30 s)">Browsers</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table></div>`;
-}
-
 function renderSession(s, all, serverUp, q, layout) {
-  const groups = transcriptGroups(s);
-  // private comments join the conversation by time: each lands in the session group that was on the plan when it was written
-  const priv = s.notes.filter((n) => n.created).map((n) => ({ at: n.created, role: "private", kind: n.state || "private", text: n.body, where: n.anchor?.text || "" }));
-  for (const n of priv) { let g = groups[0]; for (const x of groups) if (String(x.first) <= String(n.at)) g = x; if (g) { g.items.push(n); g.items.sort((a, b) => String(a.at).localeCompare(String(b.at))); } }
-  groups.reverse();
-  const msgHtml = (i) => `<div class="msg ${i.role === "agent" ? "agent" : i.role === "system" ? "sys" : i.role === "private" ? "priv" : i.kind === "annotation" ? "ann" : ""}"><small>${i.role === "agent" ? "agent" : i.role === "system" ? "system" : i.role === "private" ? "private" : "you"} · ${esc(i.kind || "")}${i.tag && i.kind === "annotation" ? ` on &lt;${esc(i.tag)}&gt;` : ""}${i.where ? ` · “${esc(String(i.where).slice(0, 80))}”` : ""} · ${fmt(i.at)}</small>${esc(i.text)}</div>`;
-  const msgs = groups.length ? groups.map((g, gi) => {
-    const live = s.agent.id && g.id === s.agent.id ? s.agent : null;
-    const resumeBtn = g.id && !(live && live.state === "active") && g.rec ? `<form class="inline" method="post" action="/connect/${s.key}?agent=${encodeURIComponent(g.id)}" style="margin-left:8px"><button class="a" type="submit" title="Resume this particular session in a terminal">Resume</button></form>` : "";
-    return `<details class="tg"${gi === 0 ? " open" : ""}><summary>${g.id ? glyph(g.provider) : ""}<span class="who">${esc(g.name)}</span>${live ? `<span class="ag ${live.state}" style="font-size:11.5px">${live.state === "active" ? '<span class="dot"></span>' : ""}${esc(live.state)}</span>` : ""}${resumeBtn}<span class="when">${g.items.length} message${g.items.length === 1 ? "" : "s"} · ${fmtDay(g.first)}${g.last !== g.first ? ` → ${fmtDay(g.last)}` : ""}</span></summary><div class="body">${g.items.map(msgHtml).join("")}</div></details>`;
-  }).join("") : (priv.length ? priv.map(msgHtml).join("") : `<p class="empty">No transcript yet. Typed messages and agent replies appear here from state.json; annotations appear once lavish-poll has delivered a round.</p>`);
   const related = s.related.map((r) => { const t = all.find((x) => x.resolved && (x.resolved.endsWith(r) || basename(x.resolved) === r)); return t ? `<a class="a" href="/session/${t.key}">${esc(t.title)}</a>` : esc(r); }).join(" ");
   const restored = q.get("restored"), prRefreshed = q.get("prs"), notice = q.get("notice"), effortResult = q.get("effort") || "", scanResult = q.get("scan") || "";
   const p = s.plan;
@@ -834,14 +845,14 @@ function renderSession(s, all, serverUp, q, layout) {
   <div class="stageline"><div class="stage-steps${p.stage === "parked" ? " parked" : ""}">${steps}</div><span>· ${esc(p.subLabel)}${p.stageNote ? ` · ${esc(p.stageNote)}` : ""}${latest ? ` · latest: ${esc(latest.text)} · ${esc(latest.session?.label || "")} · ${fmtDay(latest.at)}` : ""}</span></div>
   ${restored ? `<div class="notice">Restored version ${esc(restored)} onto disk. Your Lavish tab will offer a reload. The agent does not learn about this by itself, so tell it in the conversation panel.</div>` : ""}
   ${notice ? `<div class="notice ${/^(Could not|Folder missing|.* not found)/.test(notice) ? "bad" : ""}">${esc(notice)}</div>` : ""}
-  <div class="twoCol"><div class="box" id="agent"><h3>Agent <span class="meta">who is on this plan, from lavish-poll / lavish-meta stamps${s.agent.source === "scan" ? " (this one from the transcript scan)" : ""}</span></h3>${agentBlock(s, { effortResult, scanResult })}${statusForm}</div>
-  <div class="box" id="launch"><h3>Resume or start a new session</h3>${launchForms(s)}</div></div>
-  <h2 id="sessions">Sessions <span class="meta">every agent that has been on this plan</span></h2>${sessionsTable(s)}
+  <div class="chat-bar" data-plan-chats="${s.key}"></div>
+  <div class="box" id="agent"><h3>Plan details</h3>${statusForm}</div>
   <h2 id="history">History <span class="meta">the plan's main events, newest first</span></h2>${renderProgress(s)}
   ${renderVersions(s)}
   ${renderCommits(s)}${renderUnsent(s)}${renderExport(s)}
-  <h2 id="conversation">Conversation <span class="meta">grouped per agent session, newest open; your private comments are in place by time and never sent</span></h2>${msgs}`;
-  return page(s.title, `${s.project} · ${s.title}`, body, serverUp, { sidebar, layout, key: s.key });
+  ${s.notes.length?`<details class="tg"><summary>Private notes · ${s.notes.length}</summary><div class="body">${s.notes.map(n=>`<div class="msg priv">${esc(n.body||"")}</div>`).join("")}</div></details>`:""}`;
+  const tabs=`<div class="plan-view-tabs" role="tablist" aria-label="Plan view"><button role="tab" data-plan-view="info" aria-selected="true">Plan information</button><button role="tab" data-plan-view="html" aria-selected="false" ${s.exists?'':'disabled'}>View HTML</button></div>`;
+  return page(s.title, `${s.project} · ${s.title}`, tabs+`<iframe hidden class="plan-preview" id="planHtmlPreview" data-src="/view/${s.key}/" title="HTML plan preview" sandbox="allow-scripts allow-forms allow-popups allow-downloads"></iframe><div id="planInformation">${body}</div>`, serverUp, { sidebar, layout, key: s.key });
 }
 
 function currentVersionState(s) {
@@ -964,6 +975,7 @@ function serveVersion(res, s, n) {
   const base = `<base href="/version/${s.key}/${n}/" target="_parent">`;
   html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => m + base) : base + html;
   html = /<body[^>]*>/i.test(html) ? html.replace(/<body[^>]*>/i, (m) => m + versionBanner(s, v)) : versionBanner(s, v) + html;
+  html=html.replace(/<\/body>/i,'<script src="/plan-ui.js"></script></body>');
   send(res, 200, "text/html; charset=utf-8", html);
 }
 function serveVersionAsset(res, s, rel) {
@@ -1009,6 +1021,7 @@ function renderDiff(s, a, b, serverUp) {
 /* ── progress, unsent and export sections of the session page ─────────── */
 /** The plan's main events, newest first: the registry log (status, PRs, notes, verdicts), PR merges (gh), the first version,
  *  every session's start and end (from its transcript) and the terminals this page started. No per-poll entries. */
+const ENTRYPOINT_WORD = { "claude-vscode": "VS Code", "claude-cursor": "Cursor", "claude-desktop": "Desktop", cli: "terminal", codex: "Codex" };
 function historyOf(s) {
   const ev = [];
   const w = (x) => (STATUS_WORDS[x] || [x.replace(/-/g, " ") || "(inferred)"])[0];
@@ -1232,6 +1245,7 @@ function serveView(res, s) {
   let html = readFileSync(s.resolved, "utf8");
   const base = `<base href="/view/${s.key}/">`;
   html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => m + base) : base + html;
+  html=html.replace(/<\/body>/i,'<script src="/plan-ui.js"></script></body>');
   send(res, 200, "text/html; charset=utf-8", html);
 }
 /** Siblings of the plan file only (its own folder and subfolders); a ../ is refused; state.json is never touched. */
@@ -1245,34 +1259,305 @@ function serveViewAsset(res, s, rel) {
 const layoutJson = (sessions) => { const layout = readLayout(); const tags = tagList(layout, new Set(sessions.map((s) => s.key))); return { layout, tags, counts: Object.fromEntries(tags.map((t) => [t.id, t.count])) }; };
 const okLevel = (v, list) => (list.includes(String(v || "")) ? String(v) : "");
 /** Resume or New session for a plan (the /connect POST, also used after Continue from ▾). Returns {redirect} or {status, html}. */
-async function launchAction(s, { isNew, body, wanted = "" }, serverUp) {
-  const provider = isNew ? (body.provider === "codex" ? "codex" : "claude") : (s.agent.provider || "claude");
-  const model = String(body.model_free || body.model || "").trim();
-  const effort = okLevel(body.effort, launchOptions()[provider].efforts);
-  const remember = { provider, model, effort, ...(isNew && body.prompt ? { prompt: String(body.prompt).slice(0, 4000) } : {}) };
-  try { updateRegistry(s.key, { file: s.resolved, launch: remember }); } catch {}
-  const back = `/session/${s.key}`;
-  const fail = (status, title, message, opts = {}) => ({ status, html: errorPage(title, message, opts, serverUp) });
+async function launchAction(s,{isNew,body,wanted=''},serverUp){
+ const data=ensureChats(s.key,s.reg,transcript(s));
+ const chat=wanted?Object.values(data.chats).find(c=>c.agent?.id===wanted):data.chats[data.activeChatId];
+ const out=await chatAction(s,isNew?'new':'resume',{...body,chatId:chat?.id});
+ return out.error?{status:409,html:errorPage('Connection needs attention',out.error,{back:`/session/${s.key}#launch`},serverUp)}:{redirect:`/session/${s.key}?notice=${encodeURIComponent(out.message)}#agent`};
+}
+/* ── Manager Marcus (phase 12, D7): when a workspace holds the plan, the chat actions act there ────────────── */
+const MM_URL=(process.env.LAVISH_MM_URL||'http://127.0.0.1:6161').replace(/\/$/,'');
+/** A lookup (GET /api/plans, GET /api/workspaces): quick, or the home goes its own way. */
+const MM_LOOKUP_TIMEOUT_MS=3000;
+/**
+ * An action (POST reconnect|resume|new): the daemon confirms a start before it answers (its own 30 s screen wait for a
+ * resume, a slow tmux under load), so the bound is its worst case plus a margin; a bound that runs out is UNCERTAIN,
+ * never a failure (Q3): the home then asks the daemon what exists before it records anything.
+ */
+const MM_ACTION_TIMEOUT_MS=Number(process.env.LAVISH_MM_ACTION_TIMEOUT_MS)>0?Number(process.env.LAVISH_MM_ACTION_TIMEOUT_MS):90000;
+/** One bounded call to the daemon; any failure (down, slow, not JSON) is null. The header says who calls; the daemon's guard, not the header, admits it. */
+async function mmFetch(path,init={},timeoutMs=MM_LOOKUP_TIMEOUT_MS){
+ try{
+  const r=await fetch(MM_URL+path,{...init,headers:{'x-lavish-home':'1',...(init.body!==undefined?{'content-type':'application/json'}:{}),...(init.headers||{})},signal:AbortSignal.timeout(timeoutMs)});
+  const text=await r.text();let parsed=null;try{parsed=JSON.parse(text);}catch{}
+  return {status:r.status,body:parsed};
+ }catch{return null;}
+}
+/** The workspace that holds the plan, as the daemon answers GET /api/plans/<key> (a read, no side effect), or null: not held, or no daemon. */
+async function mmHolder(key){
+ const r=await mmFetch(`/api/plans/${key}`);
+ return r&&r.status===200&&r.body&&r.body.workspace&&typeof r.body.workspace.id==='string'?r.body:null;
+}
+/** The daemon's answer as the home's: ok with what the daemon confirmed (never what was asked for), or its refusal verbatim. `late` answers a bound that ran out. */
+function mmAnswer(r,message,late){
+ if(!r)return late?late():{error:'Manager Marcus holds this plan but did not answer.'};
+ if(r.status>=200&&r.status<300&&r.body&&typeof r.body.tmuxName==='string')return {ok:true,message,mm:{workspaceId:r.body.workspaceId,tmuxName:r.body.tmuxName,url:r.body.url}};
+ return {error:(r.body&&typeof r.body.error==='string')?r.body.error:`Manager Marcus answered ${r.status}.`};
+}
+/** The name a delegated new chat's terminal is started under: the chat it belongs to, readable in the workspace's terminal list. */
+const mmChatName=chatId=>`lavish ${String(chatId).slice(0,8)}`;
+/** The home follows an uncertain start up on its own, re-sending the same request id this often (0 turns it off; the copy's tests do). */
+const MM_FOLLOWUP_MS=process.env.LAVISH_MM_FOLLOWUP_MS!==undefined?Number(process.env.LAVISH_MM_FOLLOWUP_MS):5000;
+const STILL_STARTING='Manager Marcus is still starting it; nothing else will be started for this plan until it answers.';
+const NOT_ANSWERING='Manager Marcus is not answering; the launch is still pending. Nothing was started.';
+const FORGOTTEN='Manager Marcus no longer knows this start: it never began, or its record is older than Manager Marcus keeps. You can try New chat again.';
+/**
+ * Ask the daemon what became of a start, by its request id, without ever starting anything (round 3): the replay form
+ * answers an envelope. Returns {done, answer} | {pending} | {failed, error} | {unknown} ("no such request"), or null
+ * for anything else (unreachable, timed out, a 5xx, an answer that is not the envelope): not an answer about the start.
+ */
+async function mmReplay(verb,key,requestId){
+ const r=await mmFetch(`/api/plans/${key}/${verb}`,{method:'POST',body:JSON.stringify({requestId,replay:true})},MM_LOOKUP_TIMEOUT_MS);
+ if(!r||!r.body)return null;
+ if(r.status===404&&r.body.error==='no such request')return {unknown:true};
+ if(r.status!==200||r.body.replay!==true||r.body.requestId!==requestId)return null;
+ if(r.body.state==='pending')return {pending:true};
+ if(r.body.state==='done'&&r.body.answer&&typeof r.body.answer.tmuxName==='string')return {done:true,answer:r.body.answer};
+ if(r.body.state==='failed')return {failed:true,error:typeof r.body.error==='string'&&r.body.error?r.body.error:'Manager Marcus recorded the start as failed.'};
+ return null;
+}
+/**
+ * One delegated start, idempotent by request id (contract 2): the daemon answers the same start for the same id, so a
+ * POST that ran past the bound is re-sent with the same id, by the next press and by the follow-up, until the daemon
+ * says what became of it. Answers: {done, status, body} | {pending} | {error, status, body} | null (unreachable or timed out).
+ */
+async function mmStart(verb,key,requestId,body,timeoutMs){
+ const r=await mmFetch(`/api/plans/${key}/${verb}`,{method:'POST',body:JSON.stringify({...body,requestId})},timeoutMs);
+ if(!r)return null;
+ if(r.status===202&&r.body&&r.body.pending===true)return {pending:true};
+ if(r.status>=200&&r.status<300&&r.body&&typeof r.body.tmuxName==='string')return {done:true,status:r.status,body:r.body};
+ return {error:(r.body&&typeof r.body.error==='string')?r.body.error:`Manager Marcus answered ${r.status}.`,status:r.status,body:r.body};
+}
+/** What a resolved delegated new chat records: the terminal the daemon confirmed (never what was asked for). */
+function mmRecordNew(key,chatId,provider,cwd,body){
+ const t=body.terminal||{};
+ markLaunched(key,chatId,{tmuxName:body.tmuxName,provider,mmWorkspace:body.workspaceId,sessionId:t.sessionId||null,agent:t.sessionId?{provider:'claude',id:t.sessionId,cwd:t.cwd||cwd,entrypoint:'cli',source:'home'}:null});
+}
+/** The uncertain resumes the home is waiting on, by plan: the request id of the start it asked for. */
+const uncertainResumes=new Map();
+/** The follow-ups running, by plan, so one start is followed by one loop. */
+const followUps=new Map();
+/**
+ * After a bound ran out: re-send the same request id every MM_FOLLOWUP_MS until the daemon answers done or an error,
+ * then resolve the record the way a press would (contract 3). Never a new start: the id is the daemon's memory of this one.
+ */
+function followUp(verb,key,requestId,onDone,onError){
+ if(!MM_FOLLOWUP_MS||followUps.has(key))return;
+ const tick=async()=>{
+  try{
+   const a=await mmReplay(verb,key,requestId);
+   if(a&&a.done){followUps.delete(key);onDone(a.answer);return;}
+   if(a&&a.failed){followUps.delete(key);onError(a.error);return;}
+   if(a&&a.unknown){followUps.delete(key);onError(FORGOTTEN);return;}
+  }catch{}
+  followUps.set(key,setTimeout(tick,MM_FOLLOWUP_MS));
+ };
+ followUps.set(key,setTimeout(tick,MM_FOLLOWUP_MS));
+}
+/** Follow an uncertain delegated new chat until the daemon says what became of it; one loop per plan (followUp), started by the press that made it uncertain and again by a read of the chats after a restart of the home. */
+function followLaunch(s,chatId,provider,projectDir){
+ followUp('new',s.key,chatId,(answer)=>{try{mmRecordNew(s.key,chatId,provider,projectDir,answer);}catch(e){console.error('[mm] follow-up record failed',e);}},(error)=>{try{failLaunch(s.key,chatId,error);}catch(err){console.error('[mm] follow-up fail failed',err);}});
+}
+/* ── The four verbs (phase 12, D7): where a session is, in words, and the place the panel names ─────────────── */
+const NOT_HELD='No Manager Marcus workspace holds this plan, or Manager Marcus is not answering: nothing was started. Choose Terminal.app instead, or add the plan to a workspace first.';
+const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+/** "10:42" for today, "3 Oct 10:42" for another day, in this machine's time; "at an unknown time" when nothing recorded it. */
+function whenWords(iso,now=new Date()){
+ const t=Date.parse(iso||'');if(!Number.isFinite(t))return 'at an unknown time';
+ const d=new Date(t),hm=`${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+ return d.toDateString()===now.toDateString()?hm:`${d.getDate()} ${MONTHS[d.getMonth()]} ${hm}`;
+}
+/** A chat's session as the home knows it: running or ended, where (Terminal.app for a terminal the home started, else the app the session reported), and when it last wrote if it ended. The workspace is the daemon's to say (mmPlace). */
+function chatPlace(c){
+ if(!c.agent?.id)return {state:'none',where:'',endedAt:''};
+ const st=agentState({agent:c.agent},liveCache,liveCache.tmux);
+ const mine=st.terminal||readTerminals().some(t=>t.tmuxName===st.tmuxName&&t.sessionId===st.id);
+ const label=st.entrypointLabel||'';
+ const where=mine?'Terminal.app':label==='terminal'?'a terminal':label||(st.provider==='codex'?'Codex':'an unknown place');
+ // When it ended: the newest thing known about it (its transcript's last line, its poll's last heartbeat, its last claim of the chat).
+ return {state:st.state,where,endedAt:st.state==='ended'?([sessionInfoOf(c.agent).lastAt,c.listeningAt,c.lastSeenAt].filter(Boolean).map(String).sort().pop()||''):''};
+}
+/** How long one answer of the daemon about a plan's place serves the panels polling the chats (each open panel asks every few seconds). */
+const MM_PLACE_CACHE_MS=2000;
+const mmPlaces=new Map();
+/**
+ * The place the panel's listening line names (A37): the workspace that holds the plan, the plan's session and pane as
+ * the daemon answers GET /api/plans/<key>, and each terminal's position in that workspace's list ("pane <n>") with
+ * whether the daemon says it runs: true, false, or null when the daemon itself cannot tell (its own listing of tmux
+ * failed). `listed` is false when the workspace's terminals could not be read at all: a chat of the workspace is then
+ * unknown, never ended.
+ * null: not held, or no daemon. Reads only; one lookup shared by every poll within MM_PLACE_CACHE_MS.
+ */
+function mmPlace(key){
+ const hit=mmPlaces.get(key);
+ if(hit&&(hit.pending||Date.now()-hit.at<MM_PLACE_CACHE_MS))return hit.pending||Promise.resolve(hit.value);
+ const pending=(async()=>{
+  let value=null;
+  try{
+   const h=await mmHolder(key);
+   if(h){
+    const panes={},alive={};let listed=false;
+    const w=await mmFetch('/api/workspaces');
+    const projects=w&&w.status===200&&w.body&&Array.isArray(w.body.projects)?w.body.projects:[];
+    const ws=projects.flatMap(p=>p&&Array.isArray(p.workspaces)?p.workspaces:[]).find(x=>x&&x.id===h.workspace.id);
+    if(ws&&Array.isArray(ws.terminals)){listed=true;ws.terminals.forEach((t,i)=>{if(t&&typeof t.tmuxName==='string'){panes[t.tmuxName]=i+1;alive[t.tmuxName]=t.liveness==='alive'?true:t.liveness==='ended'?false:null;}});}
+    const terminal=h.terminal&&typeof h.terminal.tmuxName==='string'?{tmuxName:h.terminal.tmuxName,alive:h.terminal.alive===true?true:h.terminal.alive===false?false:null}:null;
+    const session=h.session&&typeof h.session.sessionId==='string'?{provider:h.session.provider==='codex'?'codex':'claude',sessionId:h.session.sessionId}:null;
+    value={workspace:{id:h.workspace.id,title:String(h.workspace.title||h.workspace.id)},flow:typeof h.flow==='string'?h.flow:null,session,terminal,pane:(terminal&&panes[terminal.tmuxName])||null,panes,alive,listed};
+   }
+  }catch{value=null;}
+  mmPlaces.set(key,{at:Date.now(),value});return value;
+ })();
+ mmPlaces.set(key,{at:0,pending});return pending;
+}
+
+const launchLocks=new Set();
+async function chatAction(s,action,body={}){
+ if(launchLocks.has(s.key))return {error:'A connection change is already in progress.'};
+ launchLocks.add(s.key);
+ try{
+  ensureChats(s.key,s.reg,transcript(s));
   await refreshLive(true);
-  if (isNew) {
-    const r = await startNewAgent({ provider, cwd: String(body.cwd || projectCwd(s)), planPath: s.resolved, planKey: s.key, model, effort, prompt: body.prompt }, { live: liveCache });
-    if (!r.ok) return fail(422, "Could not start a new session", r.error, { back: `${back}#launch` });
-    if (r.agent) { try { updateRegistry(s.key, { file: s.resolved, agent: r.agent }); } catch {} }
-    const note = `Started ${r.tmuxName} in Terminal.app${r.terminalError ? ` (the window did not open: ${r.terminalError}; attach with: tmux attach -t '=${r.tmuxName}')` : ""}. Its first prompt opens this plan in Lavish and polls it${r.provider === "codex" ? "; the Codex thread is matched by folder on that first poll" : ""}.`;
-    return { redirect: `${back}?notice=${encodeURIComponent(note)}#agent` };
+  // `where` (the four verbs, D7): "terminal" takes the home's own path even when a workspace holds the plan; "here" asks for the workspace and is refused when none holds it; absent, a held plan's action goes to its workspace, as before.
+  const wanted=body.where==='terminal'||body.where==='here'?body.where:'';
+  if(action==='new'&&wanted)rememberWhere(s.key,wanted);
+  const state=readChats(s.key),selected=state.chats[body.chatId||state.activeChatId];
+  // An UNCERTAIN delegated start comes first, before any lookup and whatever the action (round 3, rule 1): it is exempt
+  // from every local expiry, and only the daemon's answer for ITS request id resolves it: the terminal, the recorded
+  // error, or "no such request". While the daemon does not answer, the home says so, keeps the reservation and starts nothing.
+  if(state.launch&&state.launch.mm&&state.launch.state==='uncertain'){
+   const launch=state.launch,chat=state.chats[launch.id];
+   const a=await mmReplay('new',s.key,launch.requestId||launch.id);
+   if(a&&a.done){mmRecordNew(s.key,launch.id,chat?.agent?.provider||'claude',String(body.cwd||projectCwd(s)),a.answer);return {ok:true,chatId:launch.id,message:'New chat started in its Manager Marcus workspace. Waiting for its agent to connect.',mm:{workspaceId:a.answer.workspaceId,tmuxName:a.answer.tmuxName,url:a.answer.url}};}
+   if(a&&a.pending)return {error:STILL_STARTING};
+   if(a&&a.failed){failLaunch(s.key,launch.id,a.error);return {error:a.error};}
+   if(a&&a.unknown){failLaunch(s.key,launch.id,FORGOTTEN);return {error:FORGOTTEN};}
+   return {error:NOT_ANSWERING};
   }
-  // Resume: optionally a specific earlier session (from a transcript group), else the plan's current agent
-  const rec = wanted ? (s.agents.find((a) => a.id === wanted) || (s.reg.agent && s.reg.agent.id === wanted ? s.reg.agent : null)) : s.reg.agent;
-  if (wanted && !rec) return fail(404, "Unknown session", `No session ${wanted} is recorded on this plan.`, { back });
-  const r = await resumeAgent({ agent: rec }, s.key, { model, effort }, { live: liveCache, tmuxNames: liveCache.tmux });
-  if (!r.ok) return fail(422, "Could not resume", r.error, { back: `${back}#launch`, extra: `<p><a class="a" href="${back}#launch">Start a New session instead</a></p>` });
-  const lv = openLavish(s);
-  if (lv.error) return fail(500, "Terminal ready, Lavish did not open", `${r.action === "resume" ? `Resumed in ${r.tmuxName}. ` : ""}${lv.error}`, { back });
-  if (r.action === "lavish" || r.terminalError || r.note) {
-    const msg = r.action === "lavish" ? r.note : `${r.note || (r.action === "resume" ? `Resumed ${r.state.name} in terminal ${r.tmuxName}.` : `Terminal ${r.tmuxName}.`)}${r.terminalError ? ` Terminal.app did not open: ${r.terminalError}. Attach by hand: tmux attach -t '=${r.tmuxName}'` : ""}`;
-    return { status: 200, html: page("Resume", s.title, `<div class="errpage"><h1>${esc(s.title)}</h1><div class="notice ${r.terminalError ? "warn" : ""}">${esc(msg)}</div><p><a class="b" style="text-decoration:none;padding:6px 12px;border-radius:6px;background:var(--acc);color:var(--accInk)" href="${esc(lv.url)}">Open the plan in Lavish</a></p><p class="meta">Opens by itself in 5 s.</p><meta http-equiv="refresh" content="5;url=${esc(lv.url)}"><p class="meta"><a class="a" href="${back}">← Back to the plan page</a></p></div>`, serverUp) };
+  {const rid=uncertainResumes.get(s.key);
+   if(rid){
+    const a=await mmReplay('resume',s.key,rid);
+    if(a&&a.done){uncertainResumes.delete(s.key);const unconfirmed=a.answer.confirmed===false;return {ok:true,...(unconfirmed?{confirmed:false}:{}),message:unconfirmed?'Session resumed in its Manager Marcus workspace; its screen was not recognised yet, look at its pane.':'Session resumed in its Manager Marcus workspace. Waiting for it to listen to this plan.',mm:{workspaceId:a.answer.workspaceId,tmuxName:a.answer.tmuxName,url:a.answer.url}};}
+    if(a&&a.pending)return {error:STILL_STARTING};
+    if(a&&a.failed){uncertainResumes.delete(s.key);return {error:a.error};}
+    if(a&&a.unknown){uncertainResumes.delete(s.key);return {error:'Manager Marcus no longer knows this resume. Nothing was started; press Resume again.'};}
+    return {error:NOT_ANSWERING};
+   }}
+  // A plan a Manager Marcus workspace holds: the action happens in that workspace (D7). No answer, or not held: today's path below.
+  const holder=wanted==='terminal'&&action!=='reconnect'?null:await mmHolder(s.key);
+  if(!holder&&wanted==='here'&&action!=='reconnect')return {error:NOT_HELD};
+  if(holder){
+   const where=holder.workspace.title||holder.workspace.id;
+   const projectDir=String(body.cwd||projectCwd(s));
+   if(action==='new'){
+    if(s.pending||s.unsentCount||s.hasDraft)return {error:'Send or clear the current chat’s pending comments and draft before starting a new chat.'};
+    const provider=body.provider==='codex'?'codex':body.provider==='claude'?'claude':s.agent.provider||'codex';
+    const model=String(body.model_free||body.model||'').trim(),effort=String(body.effort||'');
+    const chat=reserveLaunch(s.key,{provider,model,effort});
+    markDelegated(s.key,chat.id,{requestId:chat.id}); // the home cannot see this terminal: no local rule may expire the launch
+    const handoff=[s.plan.summary,...(s.reg.progress||[]).slice(-5).map(p=>p.text)].filter(Boolean).join('\n').slice(0,5000);
+    const prompt=`Read the plan at ${s.resolved}. This is a new chat for the same plan. Preserve the plan and earlier chats.\nCurrent handoff:\n${handoff||'Read the plan for the current decisions and next steps.'}\nOpen it with lavish-axi and poll it using lavish-poll ${JSON.stringify(s.resolved)} --chat ${chat.id}. Use that --chat value on each poll. Report your understanding before continuing. ${String(body.prompt||'').slice(0,4000)}`;
+    // The request id is the reservation's id: the daemon starts once per id (contract 2), so a late answer is never a second agent.
+    const a=await mmStart('new',s.key,chat.id,{provider,...(model?{model}:{}),...(effort?{effort}:{}),prompt,cwd:projectDir,name:mmChatName(chat.id)},MM_ACTION_TIMEOUT_MS);
+    if(a&&a.done){mmRecordNew(s.key,chat.id,provider,projectDir,a.body);return {ok:true,chatId:chat.id,message:`New chat started in ${where}. Waiting for its agent to connect.`,mm:{workspaceId:a.body.workspaceId,tmuxName:a.body.tmuxName,url:a.body.url}};}
+    if(a&&a.error){failLaunch(s.key,chat.id,a.error);return {error:a.error};}
+    // Timed out, or pending: uncertain until the daemon says (contract 3). The reservation stays; the replay of its id, by the next press and by the follow-up, resolves it; failLaunch is never called from here.
+    markUncertain(s.key,chat.id,{requestId:chat.id});
+    followLaunch(s,chat.id,provider,projectDir);
+    return {error:STILL_STARTING};
+   }
+   // The verb acts on the SELECTED chat's own session (review round 1, Q3). The daemon's reconnect and its plain resume
+   // know only the plan's own session (the flow's planner once there is one), so they are asked only when the selected
+   // chat IS that session, or when no chat is selected.
+   const sid=selected&&selected.agent&&selected.agent.id||'';
+   const planSid=holder.session&&typeof holder.session.sessionId==='string'?holder.session.sessionId:'';
+   if(action==='reconnect'){
+    mmPlaces.delete(s.key);const place=await mmPlace(s.key);
+    const name=selected&&typeof selected.tmuxName==='string'?selected.tmuxName:'';
+    const sameWs=Boolean(place&&place.workspace.id===holder.workspace.id);
+    const listedAs=sameWs&&name&&Object.hasOwn(place.alive,name)?place.alive[name]:undefined; // true, false, null (the daemon cannot tell), or undefined: not in the workspace's list
+    const plansOwn=!selected||(sid&&sid===planSid)||(name&&holder.terminal&&holder.terminal.tmuxName===name);
+    const ofWorkspace=!plansOwn&&name&&(selected.mmWorkspace===holder.workspace.id||listedAs!==undefined);
+    if(ofWorkspace){
+     // A chat Manager Marcus runs in this workspace, in its own pane: alive, that pane is the session to go to (no url:
+     // the home does not know the page's address, the panel focuses the pane by its name); ended, the refusal is THIS
+     // chat's when and where; when the daemon cannot say (its terminals could not be listed), nothing is assumed.
+     const live=listedAs!==undefined?listedAs:(sameWs&&place.listed?false:null);
+     if(live===true)return {ok:true,message:`Session is open in ${where}.`,mm:{workspaceId:holder.workspace.id,tmuxName:name,url:null}};
+     if(live===null)return {error:`Cannot tell whether ${name} is running (Manager Marcus could not list its terminals); try again.`};
+     return {error:`No session to go to; the last one ended ${whenWords(chatPlace(selected).endedAt)} in ${where} (terminal ${name}).`};
+    }
+    if(plansOwn)return mmAnswer(await mmFetch(`/api/plans/${s.key}/reconnect`,{method:'POST',body:'{}'},MM_ACTION_TIMEOUT_MS),`Session is open in ${where}.`);
+    // A chat that is neither the plan's own session nor one of this workspace's terminals (it ran in Terminal.app or in another app): what the home itself knows of it answers, below.
+   }
+   if(action==='resume'){
+    const plansOwn=!selected||(sid&&sid===planSid);
+    if(selected&&!sid)return {error:'This chat has no recorded session to resume. Start a new chat using the plan.'};
+    // The resumed session must be able to claim its chat when it polls: the chat becomes the active one first (as the home's own resume does), and is put back if the daemon refuses.
+    let previous='';
+    if(selected&&state.activeChatId!==selected.id){
+     if(s.pending||s.unsentCount||s.hasDraft)return {error:'Send or clear pending feedback before switching the active chat.'};
+     if(state.launch)return {error:'A new chat is waiting to connect. Reconnect that chat first.'};
+     previous=state.activeChatId;selectChat(s.key,selected.id);
+    }
+    // One request id per asked-for resume, kept while uncertain (contract 3): the replay above resolves it; the daemon resumes once per id.
+    // A chat that is not the plan's own session names its session, and the prompt that reconnects it to its chat: the daemon resumes THAT session, in the terminal of this workspace that ran it, or refuses.
+    const requestId=mmRandomUUID();
+    const ask={...(body.model?{model:String(body.model)}:{}),...(plansOwn?{}:{session:{provider:selected.agent.provider==='codex'?'codex':'claude',sessionId:sid},prompt:`Reconnect to the plan with lavish-poll ${JSON.stringify(s.resolved)} --chat ${selected.id}. Read its current state before editing.`})};
+    const a=await mmStart('resume',s.key,requestId,ask,MM_ACTION_TIMEOUT_MS);
+    // A resume the daemon could not confirm (its screen was not recognised in time) happened all the same: its terminal runs in the workspace. The answer says so and points at the pane, where a person can see what it shows (review round 2, Q8).
+    if(a&&a.done&&a.body.confirmed===false)return {ok:true,confirmed:false,message:`Session resumed in ${where}; its screen was not recognised yet, look at its pane.`,mm:{workspaceId:a.body.workspaceId,tmuxName:a.body.tmuxName,url:a.body.url}};
+    if(a&&a.done)return {ok:true,message:`Session resumed in ${where}. Waiting for it to listen to this plan.`,mm:{workspaceId:a.body.workspaceId,tmuxName:a.body.tmuxName,url:a.body.url}};
+    if(a&&a.error){if(previous){try{selectChat(s.key,previous);}catch(e){console.error('[mm] the active chat could not be put back',e);}}return {error:a.error};}
+    uncertainResumes.set(s.key,requestId);
+    return {error:STILL_STARTING};
+   }
   }
-  return { redirect: lv.url };
+  if(action==='new'){
+   if(s.pending||s.unsentCount||s.hasDraft)return {error:'Send or clear the current chat’s pending comments and draft before starting a new chat.'};
+   const provider=body.provider==='codex'?'codex':body.provider==='claude'?'claude':s.agent.provider||'codex';
+   const model=String(body.model_free||body.model||'').trim(),effort=String(body.effort||'');
+   const chat=reserveLaunch(s.key,{provider,model,effort});
+   const handoff=[s.plan.summary,...(s.reg.progress||[]).slice(-5).map(p=>p.text)].filter(Boolean).join('\n').slice(0,5000);
+   const prompt=`Read the plan at ${s.resolved}. This is a new chat for the same plan. Preserve the plan and earlier chats.\nCurrent handoff:\n${handoff||'Read the plan for the current decisions and next steps.'}\nOpen it with lavish-axi and poll it using lavish-poll ${JSON.stringify(s.resolved)} --chat ${chat.id}. Use that --chat value on each poll. Report your understanding before continuing. ${String(body.prompt||'').slice(0,4000)}`;
+   let r;try{r=await startNewAgent({provider,cwd:String(body.cwd||projectCwd(s)),planPath:s.resolved,planKey:s.key,model,effort,prompt},{live:liveCache});}catch(e){failLaunch(s.key,chat.id,e.message);throw e;}
+   if(!r.ok){failLaunch(s.key,chat.id,r.error);return {error:r.error};}
+   markLaunched(s.key,chat.id,r);
+   return {ok:true,chatId:chat.id,message:r.terminalError?`Agent started; terminal needs attention: ${r.terminalError}`:'New chat started. Waiting for its agent to connect.'};
+  }
+  if(!selected)return {error:'Choose a saved chat first.'};
+  const rec=selected.agent;
+  if(state.launch?.id===selected.id){
+   // A launch delegated to Manager Marcus runs in a terminal the home cannot see: none of the rules below (the home's own tmux, the 15-second expiry) apply to it (round 3, rule 1). Reached only when the holder lookup did not answer.
+   if(state.launch.mm)return {error:NOT_ANSWERING};
+   if(state.launch?.id===selected.id&&selected.tmuxName&&liveCache.tmux.has(selected.tmuxName)){
+    const pane=await capturePane(selected.tmuxName,12);if(!paneIdle(pane))return {error:'The new agent is still starting or busy. Its connection is not confirmed yet.'};
+    const r=await sendText(selected.tmuxName,`Read ${s.resolved} and connect with lavish-poll ${JSON.stringify(s.resolved)} --chat ${selected.id}`);
+    return r.ok?{ok:true,message:'Reconnect request sent. Waiting for the agent to listen.'}:{error:r.error};
+   }
+   if(Date.now()-Date.parse(state.launch.at)>15000&&!liveCache.tmux.has(selected.tmuxName)){failLaunch(s.key,selected.id,'Agent launch ended before connecting.');return {error:'The launch ended before connecting. Your previous chat has been restored; you can try New chat again.'};}
+   return {error:'The agent is still starting. Check its launch window and try Reconnect again.'};
+  }
+  if(!rec?.id)return {error:action==='reconnect'?'No session to go to; this chat never recorded one. Start a new chat using the plan.':'This older conversation has no recorded session to resume. Start a new chat using the plan.'};
+  // Go to session never starts anything (D7): with no session running there is nothing to go to, and the refusal says when and where the last one ended. Resume is the verb that starts one.
+  if(action==='reconnect'){const p=chatPlace(selected);if(p.state!=='active')return {error:`No session to go to; the last one ended ${whenWords(p.endedAt)} in ${p.where}.`};}
+  if(state.activeChatId!==selected.id&&(s.pending||s.unsentCount||s.hasDraft))return {error:'Send or clear pending feedback before switching the active chat.'};
+  if(state.launch)return {error:'A new chat is waiting to connect. Reconnect that chat first.'};
+  // A running editor session has its own process owner. Never launch another writer for it.
+  const current=agentState({agent:rec},liveCache,liveCache.tmux);
+  if(current.state==='active'&&!current.terminal){
+   // Go to session (D7): alive somewhere the home cannot bring forward, so the answer says where it is.
+   if(action==='reconnect')return {error:`${rec.provider==='codex'?'Codex':'Claude'} session ${current.name} is running in ${chatPlace(selected).where}: go to it there. To have it listen to this plan, ask it to run lavish-poll ${JSON.stringify(s.resolved)} --chat ${selected.id}.`};
+   return {error:`${rec.provider==='codex'?'Codex':'Claude'} session ${current.name} is open in its app. Open that session and ask it to run lavish-poll ${JSON.stringify(s.resolved)} --chat ${selected.id}. The app does not expose a safe terminal reconnect for this session.`};
+  }
+  const reconnectPrompt=`Reconnect to the plan with lavish-poll ${JSON.stringify(s.resolved)} --chat ${selected.id}. Read its current state before editing.`;
+  selectChat(s.key,selected.id);
+  const r=await resumeAgent({agent:rec},s.key,{model:body.model||rec.model||'',effort:body.effort||rec.effort||'',prompt:reconnectPrompt},{live:liveCache,tmuxNames:liveCache.tmux});
+  if(!r.ok){if(state.activeChatId&&state.activeChatId!==selected.id)selectChat(s.key,state.activeChatId);return {error:r.error};}
+  updateRegistry(s.key,{agent:{...rec,source:'home'}});
+  if(r.tmuxName&&r.action!=='resume'){const pane=await capturePane(r.tmuxName,12);if(paneIdle(pane)){const sent=await sendText(r.tmuxName,reconnectPrompt);if(!sent.ok)return {error:sent.error};}}
+  return {ok:true,message:action==='reconnect'?'Session is open in Terminal.app. Waiting for it to listen to this plan.':'Session resumed. Waiting for it to listen to this plan.'};
+ }catch(e){return {error:e.message};}finally{launchLocks.delete(s.key);mmPlaces.delete(s.key);}
 }
 
 http.createServer(async (req, res) => {
@@ -1281,7 +1566,9 @@ http.createServer(async (req, res) => {
     const path = url.pathname;
     let m;
     cors(req, res);
+    if(req.method==='POST'&&(/^\/api\/chats\//.test(path)||/^\/(connect|restart)\//.test(path))&&req.headers.origin&&!LOOPBACK.test(req.headers.origin))return json(res,403,{error:'Connection changes must come from the local Lavish page.'});
     if (req.method === "OPTIONS") { res.writeHead(204); return res.end(); }
+    if(path==='/plan-ui.js'||path==='/chat-panel.client.js'){return send(res,200,'application/javascript',readFileSync(fileURLToPath(new URL('.'+path,import.meta.url)),'utf8'));}
     if (path === "/health") return json(res, 200, { ok: true, app: "lavish-home", sessions: Object.keys(readJson(join(stateDir, "state.json"), { sessions: {} }).sessions || {}).length, agentScan: lastAgentScan });
 
     /* API (CORS-enabled for the Lavish chrome) */
@@ -1332,10 +1619,26 @@ http.createServer(async (req, res) => {
       return json(res, 405, { error: "GET or PUT" });
     }
     await refreshLive();
+    if((m=/^\/api\/chats\/([0-9a-f]{16})(?:\/(new|resume|reconnect))?$/.exec(path))){
+      const s=loadSessions().find(s=>s.key===m[1]);if(!s)return json(res,404,{error:'Plan not found'});
+      const messages=transcript(s);ensureChats(s.key,s.reg,messages);
+      if(req.method==='POST'&&m[2]){
+        const body=parseBody(await readBody(req),req.headers['content-type']);
+        const out=await chatAction(s,m[2],body);
+        return json(res,out.error?409:200,out);
+      }
+      if(req.method!=='GET')return json(res,405,{error:'GET or POST required'});
+      const data=readChats(s.key);const groups=groupMessages(data,messages);
+      const chats=Object.values(data.chats).map(c=>{const info=c.agent?.id?sessionInfoOf(c.agent):{};return {...c,model:info.model||c.agent?.model||'',modelName:modelNameOf(info.model||c.agent?.model||''),modelObserved:Boolean(info.model||c.agent?.modelObserved),agentState:agentState({agent:c.agent},liveCache,liveCache.tmux).state,place:chatPlace(c),messages:groups[c.id]||[]};});
+      // An uncertain delegated launch is followed until the daemon answers; the loop lives in this process, so a read of the chats starts it again after a restart of the home (a press never resolves or clears it).
+      if(data.launch&&data.launch.mm&&data.launch.state==='uncertain')followLaunch(s,data.launch.id,data.chats[data.launch.id]?.agent?.provider||'claude',projectCwd(s));
+      if(groups.legacy?.length&&!chats.some(c=>c.id==='legacy'))chats.unshift({id:'legacy',title:'Earlier conversation',agent:{},messages:groups.legacy});
+      return json(res,200,{activeChatId:data.activeChatId,connection:listeningState(data),launch:data.launch?{id:data.launch.id,state:data.launch.state,mm:Boolean(data.launch.mm)}:null,resumePending:uncertainResumes.has(s.key),mm:await mmPlace(s.key),where:data.newChatWhere==='here'||data.newChatWhere==='terminal'?data.newChatWhere:'',chats,links:s.plan.links,models:modelsForClient(),cwd:projectCwd(s)});
+    }
     if ((m = /^\/api\/registry\/([0-9a-f]{16})(\/refresh-prs)?$/.exec(path))) {
       const sessions = loadSessions(); const s = sessions.find((x) => x.key === m[1]);
       if (!s) return json(res, 404, { error: "no such session" });
-      if (m[2]) { const r = refreshPrs(s, { force: true }); return json(res, 200, { ...r, plan: loadSessions().find((x) => x.key === m[1]).plan }); }
+      if (m[2]) { const r = await refreshPrs(s, { force: true }); return json(res, 200, { ...r, plan: loadSessions().find((x) => x.key === m[1]).plan }); }
       if (req.method === "POST") {
         const body = parseBody(await readBody(req), req.headers["content-type"]);
         const origin = String(req.headers.origin || "");
@@ -1499,20 +1802,9 @@ http.createServer(async (req, res) => {
       return redirect(res, `/session/${s.key}?notice=${encodeURIComponent(`Renamed to “${title}”. The Lavish tab shows the new title after a reload.`)}`);
     }
     if (req.method === "POST" && (m = /^\/restart\/([0-9a-f]{16})$/.exec(path))) {
-      const s = sessions.find((x) => x.key === m[1]); if (!s || !s.exists) return send(res, 404, "text/plain", "no such session or file missing");
-      const back = `/session/${s.key}`;
-      await refreshLive(true);
-      const st = agentState(s.reg, liveCache, liveCache.tmux);
-      if (st.state === "active") return send(res, 409, "text/html; charset=utf-8", errorPage("Restart refused", `Session ${st.name} is live in ${st.terminal ? `terminal ${st.tmuxName}` : st.entrypointLabel || "another process"}. End it there first, then Restart: a second agent on the same plan would fight the first. Nothing was started.`, { back }, serverUp));
-      let endNote = "";
-      if (s.status !== "ended") { const r = spawnSync("lavish-axi", ["end", s.resolved], { encoding: "utf8", env: localBinEnv(), timeout: 60000 }); if (r.status !== 0) endNote = ` (lavish-axi end failed: ${(r.stderr || r.stdout || "").trim().slice(0, 200)})`; }
-      const closed = markTabs(s.key, "restarted from the home page");
-      const l = s.reg.launch || {};
-      const provider = l.provider || st.provider || "claude";
-      const r = await startNewAgent({ provider, cwd: projectCwd(s), planPath: s.resolved, planKey: s.key, model: l.model, effort: l.effort }, { live: liveCache });
-      if (!r.ok) return send(res, 422, "text/html; charset=utf-8", errorPage("Could not restart", `The Lavish session was ended${endNote} and ${closed} tab${closed === 1 ? "" : "s"} told to close, but no new session started: ${r.error}`, { back }, serverUp));
-      try { if (r.agent) updateRegistry(s.key, { file: s.resolved, agent: r.agent }); updateRegistry(s.key, { file: s.resolved, progress: `restarted by the home page: ${r.tmuxName} (${provider}${l.model ? `, ${l.model}` : ""})${closed ? ` · ${closed} tab${closed === 1 ? "" : "s"} told to close` : ""}`, session: { label: "home page", host: os.hostname().replace(/\.local$/, "") } }); } catch {}
-      return redirect(res, `${back}?notice=${encodeURIComponent(`Restarted: Lavish session ended${endNote}, ${closed} tab${closed === 1 ? "" : "s"} told to close, ${r.tmuxName} started in Terminal.app${r.terminalError ? ` (the window did not open: ${r.terminalError}; attach with: tmux attach -t '=${r.tmuxName}')` : ""}. Its first prompt reopens this plan in Lavish and polls it.`)}#agent`);
+      const s=sessions.find(x=>x.key===m[1]);if(!s)return send(res,404,"text/plain","Plan not found");
+      const out=await launchAction(s,{isNew:true,body:s.reg.launch||{}},serverUp);
+      return out.redirect?redirect(res,out.redirect):send(res,out.status,"text/html; charset=utf-8",out.html);
     }
     if ((m = /^\/export\/([0-9a-f]{16})$/.exec(path))) {
       const s = sessions.find((x) => x.key === m[1]); if (!s || !s.exists) return send(res, 404, "text/plain", "no such session or file missing");
@@ -1562,12 +1854,12 @@ http.createServer(async (req, res) => {
       const body = parseBody(await readBody(req), req.headers["content-type"]);
       const pr = Number(body.pr);
       try { updateRegistry(s.key, { file: s.resolved || undefined, status: body.status ?? undefined, priority: body.priority ?? undefined, summary: body.summary !== undefined && body.summary !== (s.reg.summary || "") ? body.summary : undefined, addPrs: Number.isInteger(pr) && pr > 0 ? [pr] : [], progress: body.progress ?? undefined, pct: body.pct !== undefined && body.pct !== "" ? body.pct : undefined, session: { label: "home page", host: os.hostname().replace(/\.local$/, "") } }); } catch (e) { return send(res, 400, "text/plain", e.message); }
-      if (Number.isInteger(pr) && pr > 0) refreshPrs(loadSessions().find((x) => x.key === s.key), { force: true });
+      if (Number.isInteger(pr) && pr > 0) await refreshPrs(loadSessions().find((x) => x.key === s.key), { force: true });
       return redirect(res, safeBack(url.searchParams.get("back"), `/session/${s.key}${body.progress ? "#progress" : ""}`));
     }
     if (req.method === "POST" && (m = /^\/refresh-prs\/([0-9a-f]{16})$/.exec(path))) {
       const s = sessions.find((x) => x.key === m[1]); if (!s) return send(res, 404, "text/plain", "no such session");
-      const r = refreshPrs(s, { force: true });
+      const r = await refreshPrs(s, { force: true });
       return redirect(res, `/session/${s.key}?prs=${encodeURIComponent(r.reason ? r.reason : `${r.checked} checked ${fmt(new Date())}`)}`);
     }
     if (req.method === "POST" && (m = /^\/(open|end)\/([0-9a-f]{16})$/.exec(path))) {

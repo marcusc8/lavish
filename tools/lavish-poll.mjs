@@ -20,7 +20,11 @@ import { createHash } from "node:crypto";
 import { resolve, join, basename } from "node:path";
 import { spawnSync } from "node:child_process";
 import os from "node:os";
-import { snapshotVersion, readHistory, roundOf, agentInfo, agentLabel, updateRegistry } from "./lavish-lib.mjs";
+import { snapshotVersion, readHistory, roundOf, agentInfo, agentLabel, updateRegistry, readRegistry } from "./lavish-lib.mjs";
+
+import { ensureChats, claimChat, heartbeat, stopListening, mayDeliver } from "./lavish-chats.mjs";
+
+import { sessionInfoOf } from "./lavish-agent.mjs";
 
 const args = process.argv.slice(2);
 const flag = (name) => { const i = args.indexOf(name); return i === -1 ? "" : String(args[i + 1] ?? ""); };
@@ -29,7 +33,7 @@ const replies = [];
 for (let i = 0; i < args.length; i++) if (args[i] === "--reply") replies.push({ n: Number(args[i + 1]), text: String(args[i + 2] ?? "") });
 const valueSlots = new Set();
 for (let i = 0; i < args.length; i++) {
-  if (["--agent-reply", "--timeout-ms", "--label"].includes(args[i])) valueSlots.add(i + 1);
+  if (["--agent-reply", "--timeout-ms", "--label", "--chat"].includes(args[i])) valueSlots.add(i + 1);
   if (args[i] === "--reply") { valueSlots.add(i + 1); valueSlots.add(i + 2); }
 }
 const file = args.find((a, i) => !a.startsWith("--") && !valueSlots.has(i));
@@ -47,8 +51,13 @@ mkdirSync(historyDir, { recursive: true });
 // Who is polling: the Claude session id every tool call carries (or the Codex thread matched by folder). Stamped on
 // the plan's registry record so the home page can say which agent is on it, and on every history row.
 const agent = agentInfo();
+if(agent){const observed=sessionInfoOf(agent);if(observed.model){agent.model=observed.model;agent.modelObserved=true;}}
+let owner={};
+if(agent?.id){
+ try{ensureChats(key,readRegistry()[key]||{},readHistory(key));owner=claimChat(key,agent,flag('--chat'));}catch(e){die(`lavish-poll: ${e.message}`);}
+}else if(flag('--chat'))die('lavish-poll: this chat requires an identifiable agent session');
 const agentRow = agent ? { provider: agent.provider, id: agent.id } : null;
-const record = (entry) => appendFileSync(historyPath, JSON.stringify({ at: new Date().toISOString(), key, file: absolute, ...(agentRow ? { agent: agentRow } : {}), ...entry }) + "\n");
+const record = (entry) => appendFileSync(historyPath, JSON.stringify({ at: new Date().toISOString(), key, file: absolute, ...(agentRow ? { agent: agentRow } : {}), ...(owner.chatId?{chatId:owner.chatId}:{}), ...entry }) + "\n");
 let sessionChanged = "";
 if (agent) {
   try { updateRegistry(key, { file: absolute, agent: { ...agent, source: "poll" } }); } catch (e) { console.warn(`lavish-poll: agent stamp skipped (${e.message})`); }
@@ -72,7 +81,7 @@ if (!(await healthy())) {
 }
 
 async function postReply(text) {
-  const res = await fetch(`${base}/api/${key}/agent-reply`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
+  const res = await fetch(`${base}/api/${key}/agent-reply`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, ...owner }) });
   if (!res.ok) die(`agent-reply failed: HTTP ${res.status} ${await res.text()}`);
 }
 // Threaded replies go first, one per item, in the form the Comments rail recognises ("↳ Re “<start of the
@@ -102,18 +111,24 @@ if (agentReply) {
   record({ role: "agent", kind: "reply", text: agentReply });
 }
 
-const url = `${base}/api/poll?file=${encodeURIComponent(absolute)}${timeoutMs ? `&timeoutMs=${encodeURIComponent(timeoutMs)}` : ""}`;
+const aborter=new AbortController();
+const pulse=()=>{if(!owner.chatId)return;try{if(!heartbeat(key,owner))aborter.abort(new Error('This chat was superseded by another connection'));}catch(e){if(!mayDeliver(key,owner))aborter.abort(e);}};
+pulse();const pulseTimer=setInterval(pulse,5000);pulseTimer.unref();
+process.on('exit',()=>{try{if(owner.chatId)stopListening(key,owner);}catch{}});
+const url = `${base}/api/poll?file=${encodeURIComponent(absolute)}&chatId=${encodeURIComponent(owner.chatId||'')}&generation=${encodeURIComponent(owner.generation||'')}${timeoutMs ? `&timeoutMs=${encodeURIComponent(timeoutMs)}` : ""}`;
 let response = null, lastErr = null;
 for (let attempt = 0; attempt < 3 && !response; attempt++) {
   try {
-    const res = await fetch(url);
+    const res = await fetch(url,{signal:aborter.signal});
     const text = (await res.text()).trim(); // long-poll streams heartbeat spaces before the JSON
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${text.slice(0, 300)}`);
     response = JSON.parse(text);
-  } catch (e) { lastErr = e; await new Promise((r) => setTimeout(r, 500)); }
+  } catch (e) { lastErr = e;if(aborter.signal.aborted)break; await new Promise((r) => setTimeout(r, 500)); }
 }
+clearInterval(pulseTimer);try{if(owner.chatId)stopListening(key,owner);}catch{}
 if (!response) die(`poll failed after 3 attempts: ${lastErr?.message}`);
 
+if(response.status === "superseded")die("This chat is no longer the active connection. Resume it from Lavish before polling again.");
 if (response.status === "missing") die(`No Lavish session for ${absolute}. Run: lavish-axi "${absolute}"`);
 if (response.status === "feedback") {
   const prompts = response.prompts || [];

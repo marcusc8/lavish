@@ -15,7 +15,8 @@ import os from "node:os";
 import { readJson, writeJsonAtomic, stateDir, claudeSessionsDir, codexHome } from "./lavish-lib.mjs";
 
 export const TMUX_BIN = "/usr/local/bin/tmux";
-export const OSASCRIPT_BIN = "/usr/bin/osascript";
+/** LAVISH_OSASCRIPT_BIN points a copy of the tools at a stub, so a check of the home's own path opens no Terminal window. */
+export const OSASCRIPT_BIN = process.env.LAVISH_OSASCRIPT_BIN || "/usr/bin/osascript";
 export const CLAUDE_BIN = join(os.homedir(), ".local/bin/claude");
 export const CODEX_BIN = join(os.homedir(), ".local/bin/codex");
 export const TMUX_PANE_COLS = 160, TMUX_PANE_ROWS = 48, TMUX_TIMEOUT_MS = 8000, TMUX_ENTER_DELAY_MS = 250;
@@ -96,7 +97,7 @@ const realpathOr = (p) => { try { return realpathSync(p); } catch { return p; } 
 /** The env the CLIs and tmux are spawned with: ~/.local/bin on PATH (launchd lacks it), no CLAUDE* inherited from this process. */
 export function childEnv(env = process.env) {
   const out = {};
-  for (const [k, v] of Object.entries(env)) if (!k.startsWith("CLAUDE")) out[k] = v;
+  for (const [k, v] of Object.entries(env)) if (!k.startsWith("CLAUDE") && !["CODEX_THREAD_ID","CODEX_SESSION_ID"].includes(k)) out[k] = v;
   out.PATH = `${join(os.homedir(), ".local/bin")}:/usr/local/bin:${env.PATH || "/usr/bin:/bin"}`;
   return out;
 }
@@ -109,9 +110,9 @@ const flag = (name, v) => (v && v !== "default" ? [name, String(v)] : []);
 /** A model id for the CLI flag: a listed id, or free text that looks like one (D7 keeps free text for both providers). */
 const okModel = (provider, m) => { const s = String(m || "").trim(); if (!s || s === "default") return ""; return /^[\w.\-:]+$/.test(s) ? s : ""; };
 const okEffort = (provider, e) => (launchOptions()[provider === "codex" ? "codex" : "claude"].efforts.includes(String(e || "")) && e !== "default" ? String(e) : "");
-export function claudeResumeArgv(bin, id, { model, effort } = {}) { return [bin, "--resume", String(id), ...flag("--model", okModel("claude", model)), ...flag("--effort", okEffort("claude", effort))]; }
+export function claudeResumeArgv(bin, id, { model, effort, prompt } = {}) { return [bin, "--resume", String(id), ...flag("--model", okModel("claude", model)), ...flag("--effort", okEffort("claude", effort)), ...(prompt ? ["--", String(prompt)] : [])]; }
 export function claudeNewArgv(bin, { sessionId, model, effort, prompt }) { return [bin, "--session-id", String(sessionId), ...flag("--model", okModel("claude", model)), ...flag("--effort", okEffort("claude", effort)), "--", String(prompt || "")]; }
-export function codexResumeArgv(bin, id, { model, effort } = {}) { const e = okEffort("codex", effort); return [bin, "resume", String(id), ...flag("-m", okModel("codex", model)), ...(e ? ["-c", `model_reasoning_effort="${e}"`] : [])]; }
+export function codexResumeArgv(bin, id, { model, effort, prompt } = {}) { const e = okEffort("codex", effort); return [bin, "resume", String(id), ...flag("-m", okModel("codex", model)), ...(e ? ["-c", `model_reasoning_effort="${e}"`] : []), ...(prompt ? [String(prompt)] : [])]; }
 export function codexNewArgv(bin, { cwd, model, effort, prompt }) { const e = okEffort("codex", effort); return [bin, "-C", String(cwd), ...flag("-m", okModel("codex", model)), ...(e ? ["-c", `model_reasoning_effort="${e}"`] : []), String(prompt || "")]; }
 /** The first prompt of a New session: open the plan in Lavish and poll it, so the session is connected before Marcus types. */
 export const defaultNewPrompt = (planPath) => `Open the plan ${planPath} in Lavish (lavish-axi "${planPath}"), then poll it with lavish-poll (never lavish-axi poll) from this session so the home page links this session to the plan. Read the plan first; say what it decides and where it stands before doing anything else.`;
@@ -192,7 +193,7 @@ export async function scrubClaudeEnv(o = {}) {
   for (const line of r.stdout.split("\n")) {
     if (!line || line.startsWith("-")) continue;
     const name = line.slice(0, line.indexOf("=") === -1 ? line.length : line.indexOf("="));
-    if (name.startsWith("CLAUDE")) { await tmux(["set-environment", "-g", "-u", name], o); scrubbed.push(name); }
+    if (name.startsWith("CLAUDE") || ["CODEX_THREAD_ID","CODEX_SESSION_ID"].includes(name)) { await tmux(["set-environment", "-g", "-u", name], o); scrubbed.push(name); }
   }
   return scrubbed;
 }
@@ -264,7 +265,7 @@ export function recordTerminal(row, path = terminalsPath()) {
  * Resume the plan's agent per decideResume. Returns {ok, action, tmuxName, error?, terminalError?, lavish: true}.
  * `deps`: { run, claudeBin, codexBin, tmuxBin, osascriptBin, live, tmuxNames, clients(name) } — all optional.
  */
-export async function resumeAgent(reg, planKey, { model, effort } = {}, deps = {}) {
+export async function resumeAgent(reg, planKey, { model, effort, prompt } = {}, deps = {}) {
   const live = deps.live || { claude: liveClaudeSessions(), codex: liveCodexThreads() };
   const tmuxNames = deps.tmuxNames || await listTmux(deps);
   const st = agentState(reg, live, tmuxNames);
@@ -278,7 +279,7 @@ export async function resumeAgent(reg, planKey, { model, effort } = {}, deps = {
   const bin = st.provider === "codex" ? (deps.codexBin || CODEX_BIN) : (deps.claudeBin || CLAUDE_BIN);
   if (!existsSync(bin)) return { ok: false, action: "resume", error: `${basename(bin)} not found in ${join(os.homedir(), ".local/bin")}`, state: st };
   if (!(await hasTmux(deps))) return { ok: false, action: "resume", error: `tmux not found at ${deps.tmuxBin || deps.bin || TMUX_BIN}`, state: st };
-  const argv = st.provider === "codex" ? codexResumeArgv(bin, st.id, { model, effort }) : claudeResumeArgv(bin, st.id, { model, effort });
+  const argv = st.provider === "codex" ? codexResumeArgv(bin, st.id, { model, effort, prompt }) : claudeResumeArgv(bin, st.id, { model, effort, prompt });
   const started = await newTmuxSession(st.tmuxName, realpathOr(st.cwd), argv, deps);
   if (!started.ok) {
     if (/duplicate session/i.test(started.error)) { const r = await activateTerminal(deps); return { ok: true, action: "activate", tmuxName: st.tmuxName, state: st, note: `already running in terminal ${st.tmuxName}`, ...(r.ok ? {} : { terminalError: r.error }) }; }
@@ -347,7 +348,11 @@ export function sessionInfoOf(rec, opts = {}) {
       const head = headText(file, 65536).split("\n")[0];
       let meta = null; try { meta = JSON.parse(head); } catch {}
       const p = meta && meta.type === "session_meta" ? meta.payload || {} : {};
-      const model = String(p.model || (p.turn_context && p.turn_context.model) || (/"model":"([^"]+)"/.exec(head) || [])[1] || "");
+      let model = String(p.model || (p.turn_context && p.turn_context.model) || (/"model":"([^"]+)"/.exec(head) || [])[1] || "");
+      for(const line of tailText(file,opts.tailBytes||262144).split("\n").reverse()){
+        let row;try{row=JSON.parse(line);}catch{continue;}
+        if(row.type==='turn_context'&&row.payload?.model){model=String(row.payload.model);break;}
+      }
       info = { model, startedAt: String(p.timestamp || (meta && meta.timestamp) || ""), lastAt: new Date(mtime).toISOString(), file };
     } else {
       const startedAt = (/"timestamp":"([^"]+)"/.exec(headText(file, opts.headBytes || 65536)) || [])[1] || "";

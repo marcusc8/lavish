@@ -13,10 +13,11 @@
  *
  * <key> is sha256(realpath of the artifact).slice(0, 16), the same key the Lavish server uses.
  */
+import { extractLinks } from "./lavish-chats.mjs";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync, openSync, readSync, closeSync, readdirSync, statSync, realpathSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawnSync, execFile } from "node:child_process";
 import os from "node:os";
 
 export const stateDir = process.env.LAVISH_AXI_STATE_DIR || join(os.homedir(), ".lavish-axi");
@@ -132,6 +133,7 @@ function safeDir(p) { try { return readdirSync(p); } catch { return []; } }
 export function agentInfo(env = process.env, cwd = process.cwd(), opts = {}) {
   const id = String(env.CLAUDE_CODE_SESSION_ID || "").trim();
   if (id) return { provider: "claude", id, entrypoint: String(env.CLAUDE_CODE_ENTRYPOINT || "cli"), cwd: realpathOr(cwd), name: claudeSessionName(id, opts.claudeSessionsDir) };
+  if(env.CODEX_THREAD_ID)return {provider:"codex",id:String(env.CODEX_THREAD_ID),entrypoint:"codex",cwd:realpathOr(cwd)};
   return resolveCodexThread(cwd, opts.codex || {});
 }
 export const MAX_AGENTS = 10;
@@ -505,9 +507,11 @@ export function gitStatusForFile(file) {
 
 /* ── gh: PR state lookups ─────────────────────────────────────────────────── */
 /** Returns {n, state, title, url, mergedAt} or {n, missing: true}; null when gh is unavailable. */
-export function ghPrView(slug, n) {
-  const r = spawnSync("gh", ["pr", "view", String(n), "--repo", slug, "--json", "number,state,title,url,mergedAt"], { encoding: "utf8", timeout: 20000, env: { ...process.env, GH_PROMPT_DISABLED: "1", GH_NO_UPDATE_NOTIFIER: "1" } });
+export async function ghPrView(slug, n) {
+  const args=["pr", "view", String(n), "--repo", slug, "--json", "number,state,title,url,mergedAt,body,comments,statusCheckRollup"];
+  const r=await new Promise(resolve=>execFile("gh",args,{encoding:"utf8",timeout:20000,maxBuffer:8e6,env:{...process.env,GH_PROMPT_DISABLED:"1",GH_NO_UPDATE_NOTIFIER:"1"}},(error,stdout,stderr)=>resolve({status:error?1:0,error:error?.code==='ENOENT'?error:null,stdout:stdout||'',stderr:stderr||''})));
+
   if (r.error) return null;
   if (r.status !== 0) return /Could not resolve|no pull requests found|not found/i.test(r.stderr) ? { n, missing: true } : null;
-  try { const j = JSON.parse(r.stdout); return { n: j.number, state: String(j.state || "").toUpperCase(), title: j.title || "", url: j.url || "", mergedAt: j.mergedAt || "" }; } catch { return null; }
+  try { const j = JSON.parse(r.stdout); return { n: j.number, state: String(j.state || "").toUpperCase(), title: j.title || "", url: j.url || "", mergedAt: j.mergedAt || "", links: extractLinks([j.url,j.body,...(j.comments||[]).map(c=>c.body),...(j.statusCheckRollup||[]).map(c=>c.targetUrl||c.detailsUrl)]) }; } catch { return null; }
 }

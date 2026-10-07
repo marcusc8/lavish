@@ -11,6 +11,8 @@
  *   chrome.css        — the rail's styles and the light (Instagram-palette) theme (rail.css appended)
  *   cli.mjs (server)  — EVERY sent prompt is copied into the persistent chat log, not only
  *                       tag === "message"; annotations get a one-line summary + kind
+ *                     — the editor page (/session/:key) may be framed by Manager Marcus's own origins only
+ *                       (P11-D2): X-Frame-Options is dropped, frame-ancestors lists MM_FRAME_ANCESTORS
  *   cli.mjs (SDK)     — the annotation card's textarea gets the same paste conversion
  *                     — mode-aware card buttons (Keep private / Queue / Suggest edit), window.lavish.privateNote(),
  *                       anchor resolution + numbered pins + tint on commented elements, click-to-highlight
@@ -30,7 +32,7 @@
  * Default target: $(npm root -g)/lavish-axi
  */
 import { readFileSync, writeFileSync, existsSync, unlinkSync } from "node:fs";
-import { execSync } from "node:child_process";
+import { execSync, execFileSync } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -46,7 +48,7 @@ for (const p of [clientPath, cliPath, cssPath]) if (!existsSync(p)) fail(`not fo
 const version = JSON.parse(readFileSync(join(target, "package.json"), "utf8")).version;
 
 const html2md = readFileSync(join(here, "html2md.js"), "utf8");
-const railJs = readFileSync(join(here, "rail.client.js"), "utf8");
+const railJs = readFileSync(join(here, "rail.client.js"), "utf8") + "\n" + readFileSync(join(here, "chat-panel.client.js"), "utf8");
 const railCss = readFileSync(join(here, "rail.css"), "utf8");
 // Shared helper: returns true when it handled the paste (structured HTML on the clipboard).
 const pasteHelper = `
@@ -262,6 +264,10 @@ const sdkCardHandler = String.raw`    sendButton.onclick = () => { lavishLocalPr
     };
     lavishLocalApplyMode();`;
 
+// Manager Marcus's own origins (Vite dev server and daemon), the only pages allowed to frame the editor.
+// X-Frame-Options has no allow-list form, so the CSP frame-ancestors directive alone carries the policy.
+const MM_FRAME_ANCESTORS = "http://localhost:5173 http://127.0.0.1:5173 http://localhost:6161 http://127.0.0.1:6161";
+
 // Light theme for the in-artifact card + pins, appended to the SDK's shadow stylesheet.
 const sdkCss = ":host{color-scheme:light;--bg:#ffffff;--bg-panel:#ffffff;--bg-elevated:#fafafa;--fg:#262626;--fg-faint:#737373;--border:#dbdbdb;--accent:#0095f6;--accent-hover:#1877f2;--brass-ink:#ffffff;--steel-700:#efefef;--steel-600:#e2e2e2;--steel-400:#8e8e8e;--ink-700:#efefef;--shadow-floating:0 12px 40px rgba(0,0,0,.18)}"
   + ".lavish-annotation-card{border-color:#dbdbdb;box-shadow:0 12px 40px rgba(0,0,0,.18)}.lavish-annotation-card .lavish-cancel,.lavish-annotation-card .lavish-private,.lavish-annotation-card .lavish-suggest{background:#efefef;color:#262626}.lavish-annotation-card .lavish-cancel:hover,.lavish-annotation-card .lavish-private:hover,.lavish-annotation-card .lavish-suggest:hover{background:#e2e2e2}.lavish-annotation-card .lavish-cancel{margin-right:auto}.lavish-annotation-card .lavish-row{flex-wrap:wrap}.lavish-attachment-remove{color:#262626}.lavish-attachment-remove:hover{background:rgba(0,0,0,.08);color:#000}"
@@ -325,6 +331,12 @@ const EDITS = [
     marker: "/* lavish-local-patch:summarize-fn */",
     anchor: `function sessionKey(file) {\n  return crypto4.createHash("sha256").update(file).digest("hex").slice(0, 16);\n}`,
     replacement: `/* lavish-local-patch:summarize-fn */\nfunction lavishLocalSummarizePrompt(prompt) {\n  const tag = String(prompt.tag || "");\n  const body = String(prompt.prompt || "");\n  const where = String(prompt.text || "").replace(/\\s+/g, " ").trim();\n  const semantic = /^(choice|export|review|note|whiteboard|layout-warnings|mermaid-node|suggestion|verdict)$/.test(tag);\n  const head = !tag ? "" : semantic ? "[" + tag + "] " : "on <" + tag + "> ";\n  const quoted = where && where !== body ? "\\u201c" + where.slice(0, 90) + (where.length > 90 ? "\\u2026" : "") + "\\u201d \\u2014 " : "";\n  return head + quoted + body;\n}\nfunction sessionKey(file) {\n  return crypto4.createHash("sha256").update(file).digest("hex").slice(0, 16);\n}`,
+  },
+  {
+    file: cliPath, id: "server:frame-ancestors",
+    marker: "/* lavish-local-patch:frame-ancestors */",
+    anchor: `      res.setHeader("x-frame-options", "DENY");\n      res.setHeader("content-security-policy", "frame-ancestors 'none'");`,
+    replacement: `      /* lavish-local-patch:frame-ancestors */\n      res.setHeader("content-security-policy", "frame-ancestors ${MM_FRAME_ANCESTORS}");`,
   },
   // ── cli.mjs: SDK ────────────────────────────────────────────────────────────────────────────
   {
@@ -423,7 +435,7 @@ for (const e of EDITS) {
   sources.set(e.file, src); applied++; log(`+ ${e.id}: patched`);
 }
 if (missing) { log(`\n${missing} anchor(s) missing on lavish-axi ${version}. Nothing written.`); process.exit(1); }
-if (check) { log(`\ncheck ok on lavish-axi ${version}: ${already} already patched, ${EDITS.length - already} would apply`); process.exit(0); }
+if (check) { execFileSync(process.execPath,[join(here,"patch-plan-workspaces.mjs"),"--target",target,"--check"],{stdio:"inherit"}); log(`\ncheck ok on lavish-axi ${version}: ${already} already patched, ${EDITS.length - already} would apply`); process.exit(0); }
 // Syntax gate BEFORE writing: a broken bundle would take the whole Lavish server down, so
 // check the patched text in a temp file and touch the real install only when it parses.
 for (const [p, src] of sources) {
@@ -439,6 +451,7 @@ for (const [p, src] of sources) {
   unlinkSync(tmp);
 }
 for (const [p, src] of sources) writeFileSync(p, src);
+execFileSync(process.execPath,[join(here,"patch-plan-workspaces.mjs"),"--target",target],{stdio:"inherit"});
 log(`\nlavish-axi ${version}: ${applied} edit(s) applied, ${already} already present. Syntax check passed.`);
 log(`chrome-client.js / chrome.css are live on the next reload; cli.mjs (SDK + server) needs: lavish-axi stop, then reopen a page.`);
 

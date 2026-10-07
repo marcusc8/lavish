@@ -1,0 +1,5 @@
+.DS_Store
+.gstack/
+node_modules/
+*.bak
+*.bak-*

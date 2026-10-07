@@ -180,7 +180,7 @@ test("scan: a Read target counts, a Bash mention does not; bounded to the projec
   assert.equal(grepped[0], 4, "only files in the 7-day window reach grep");
   assert.equal(found[0].tool, "Edit");
   // Codex rollout in the same folder that mentions the file
-  const codexRoot = join(tmp, "codex2"); const day = join(codexRoot, "sessions", "2026", "09", "04"); mkdirSync(day, { recursive: true });
+  const codexRoot = join(tmp, "codex2"); const t = new Date(), pad = (n) => String(n).padStart(2, "0"); const day = join(codexRoot, "sessions", String(t.getUTCFullYear()), pad(t.getUTCMonth() + 1), pad(t.getUTCDate())); mkdirSync(day, { recursive: true }); // today: the scan skips rollout days older than the window
   writeFileSync(join(day, "rollout-a.jsonl"), JSON.stringify({ type: "session_meta", payload: { id: "cx-1", cwd: cwd + "/sub" } }) + "\n" + JSON.stringify({ text: `sed -n 1,5p ${plan}` }) + "\n");
   writeFileSync(join(day, "rollout-b.jsonl"), JSON.stringify({ type: "session_meta", payload: { id: "cx-2", cwd: "/elsewhere" } }) + "\n" + plan + "\n");
   const withCodex = await A.scanTranscripts(plan, cwd, { run, projectsRoot: root, codexRoot });
@@ -262,4 +262,12 @@ test("models.json: seeded on first read, edits picked up by mtime, names for ids
   assert.deepEqual(A.codexNewArgv("/x", { cwd: "/p", model: "gpt-6-luna", effort: "xhigh", prompt: "hi" }), ["/x", "-C", "/p", "-m", "gpt-6-luna", "hi"]);
   assert.deepEqual(A.codexNewArgv("/x", { cwd: "/p", model: "gpt-6-luna", effort: "low", prompt: "hi" }), ["/x", "-C", "/p", "-m", "gpt-6-luna", "-c", 'model_reasoning_effort="low"', "hi"]);
   writeFileSync(mp, JSON.stringify(A.DEFAULT_MODELS)); utimesSync(mp, new Date(Date.now() + 9000), new Date(Date.now() + 9000)); // back to the defaults for the tests that follow
+});
+
+test('resumed sessions receive the reconnect prompt and children cannot inherit the parent Codex identity',async()=>{
+ const {childEnv,codexResumeArgv,claudeResumeArgv}=await import('../lavish-agent.mjs');
+ const env=childEnv({PATH:'/bin',CODEX_THREAD_ID:'parent',CODEX_SESSION_ID:'parent-other',LAVISH_AXI_PORT:'4487'});
+ assert.equal(env.CODEX_THREAD_ID,undefined);assert.equal(env.CODEX_SESSION_ID,undefined);assert.equal(env.LAVISH_AXI_PORT,'4487');
+ assert.equal(codexResumeArgv('codex','id',{prompt:'Reconnect this chat'}).at(-1),'Reconnect this chat');
+ assert.deepEqual(claudeResumeArgv('claude','id',{prompt:'Reconnect this chat'}).slice(-2),['--','Reconnect this chat']);
 });

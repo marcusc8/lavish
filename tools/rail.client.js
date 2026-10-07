@@ -38,6 +38,9 @@
   const CHAT_OPEN_KEY = "lavish-axi:chat-open";
   const MODE_KEY = "lavish-axi:comment-mode";
   const FILTER_KEY = "lavish-axi:rail-filter";
+  // The widths the grips set, per browser (as the home page keeps its sidebar's): absent = the stylesheet's default.
+  const RAIL_W_KEY = "lavish-axi:rail-w";
+  const PANEL_W_KEY = "lavish-axi:panel-w";
   const ls = {
     get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* memory only */ } },
@@ -252,6 +255,7 @@
     if (railFilter === "all" && resolved.length) html += '<details class="lavish-rail-group"><summary>Resolved \u00b7 ' + resolved.length + "</summary>" + resolved.map((c) => cardHtml(c, false)).join("") + "</details>";
     if (railFilter === "all" && detached.length) html += '<details class="lavish-rail-group" open><summary>Detached \u00b7 ' + detached.length + " <span>section changed or removed</span></summary>" + detached.map((c) => cardHtml(c, true)).join("") + "</details>";
     listEl.innerHTML = html;
+    fitEditor(listEl.querySelector(".lavish-card-edit"));
     if (legacyEl) legacyEl.hidden = !(anchorsSupported === false && all.length);
     if (syncEl) {
       syncEl.className = "lavish-rail-sync" + (synced === true ? " is-on" : synced === false ? " is-off" : "") + (busy ? " is-busy" : "");
@@ -261,6 +265,15 @@
     requestAnchors();
   }
   const cssEscape = (s) => (window.CSS && CSS.escape ? CSS.escape(s) : String(s).replace(/["\\]/g, "\\$&"));
+  /** The edit box is as tall as its text: it wraps inside the card and grows downward, never sideways; the list keeps its scroll position. */
+  function fitEditor(ta) {
+    if (!ta) return;
+    const top = listEl.scrollTop;
+    ta.style.height = "auto";
+    ta.style.height = ta.scrollHeight + 2 + "px";
+    listEl.scrollTop = top;
+  }
+  listEl.addEventListener("input", (event) => { if (event.target.matches(".lavish-card-edit")) fitEditor(event.target); });
   function focusEditor(id) {
     const ta = listEl.querySelector('.lavish-card-edit[data-id="' + cssEscape(id) + '"]');
     if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
@@ -331,6 +344,68 @@
     const files = [...(event.clipboardData?.files || [])].filter((f) => /^image\//.test(f.type));
     if (files.length) { event.preventDefault(); attachFiles(event.target.dataset.id, files); }
   });
+
+  /* ── grips: the rail's and the conversation panel's widths, dragged and remembered ── */
+  // One grip on the left edge of each column. A drag sets the column's width from the pointer; arrow keys move it by
+  // a step; a double click returns it to the stylesheet's default. The width lives in a root variable the layout's
+  // grid already reads, and in localStorage, so a reload keeps it.
+  const GRIP_STEP_PX = 16;
+  const ARTIFACT_MIN_PX = 320;
+  const grips = [
+    { name: "rail", key: RAIL_W_KEY, host: rail, attr: "data-lavish-rail-w", prop: "--lavish-user-rail-w", min: 220, max: 640, label: "Resize the comments rail" },
+    { name: "panel", key: PANEL_W_KEY, host: document.getElementById("panel"), attr: "data-lavish-panel-w", prop: "--lavish-user-panel-w", min: 280, max: 720, label: "Resize the conversation panel" },
+  ].filter((g) => g.host);
+  const root = document.documentElement;
+  function gripLimit(g) {
+    // The artifact keeps a usable width: a column can take what the window leaves after the other column and that minimum.
+    const other = grips.filter((x) => x !== g && x.host.getBoundingClientRect().width > 0).reduce((n, x) => n + x.host.getBoundingClientRect().width, 0);
+    return Math.max(g.min, Math.min(g.max, window.innerWidth - other - ARTIFACT_MIN_PX));
+  }
+  function setGripWidth(g, px, remember) {
+    if (px === null) { root.removeAttribute(g.attr); root.style.removeProperty(g.prop); if (remember) { try { localStorage.removeItem(g.key); } catch { /* memory only */ } } }
+    else {
+      const w = Math.round(Math.max(g.min, Math.min(gripLimit(g), px)));
+      root.style.setProperty(g.prop, w + "px"); root.setAttribute(g.attr, "");
+      if (remember) ls.set(g.key, w);
+    }
+    g.el.setAttribute("aria-valuenow", String(Math.round(g.host.getBoundingClientRect().width)));
+  }
+  for (const g of grips) {
+    const el = document.createElement("div");
+    el.className = "lavish-grip"; el.dataset.grip = g.name; el.tabIndex = 0;
+    el.setAttribute("role", "separator"); el.setAttribute("aria-orientation", "vertical"); el.setAttribute("aria-label", g.label);
+    el.setAttribute("aria-valuemin", String(g.min)); el.setAttribute("aria-valuemax", String(g.max)); el.title = "Drag to resize · double-click for the default width";
+    g.el = el; g.host.appendChild(el);
+    const stored = Number(ls.get(g.key, 0));
+    if (Number.isFinite(stored) && stored > 0) setGripWidth(g, stored, false);
+    el.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault(); event.stopPropagation();
+      el.setPointerCapture(event.pointerId); el.classList.add("is-dragging"); document.body.classList.add("lavish-resizing");
+      // The column's right edge stays where it is; its width changes by as much as the pointer has moved, so a press
+      // with no movement (a click, the first half of a double click) changes nothing.
+      const startX = event.clientX, startW = g.host.getBoundingClientRect().width;
+      let moved = false;
+      const move = (e) => { if (e.clientX !== startX) moved = true; if (moved) setGripWidth(g, startW + startX - e.clientX, false); };
+      const done = (e) => {
+        el.removeEventListener("pointermove", move); el.removeEventListener("pointerup", done); el.removeEventListener("pointercancel", done);
+        el.classList.remove("is-dragging"); document.body.classList.remove("lavish-resizing");
+        if (!moved) return;
+        if (e.type === "pointerup") setGripWidth(g, startW + startX - e.clientX, true);
+        else { const kept = Number(ls.get(g.key, 0)); setGripWidth(g, kept > 0 ? kept : null, false); }
+      };
+      el.addEventListener("pointermove", move); el.addEventListener("pointerup", done); el.addEventListener("pointercancel", done);
+    });
+    el.addEventListener("dblclick", () => setGripWidth(g, null, true));
+    el.addEventListener("keydown", (event) => {
+      const dir = event.key === "ArrowLeft" ? 1 : event.key === "ArrowRight" ? -1 : 0;
+      if (!dir) return;
+      event.preventDefault(); event.stopPropagation();
+      setGripWidth(g, g.host.getBoundingClientRect().width + dir * GRIP_STEP_PX, true);
+    });
+  }
+  // A narrower window takes width back from a column that no longer fits; the remembered width is kept for a wider one.
+  window.addEventListener("resize", () => { for (const g of grips) { const kept = Number(ls.get(g.key, 0)); if (kept > 0) setGripWidth(g, kept, false); } });
 
   /* ── actions ─────────────────────────────────────────────────────────── */
   const noteById = (id) => notes.find((n) => n.id === id);
