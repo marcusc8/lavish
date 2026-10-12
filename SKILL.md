@@ -16,6 +16,16 @@ lavish-axi is **pinned and patched on this machine**. Never run `npx -y lavish-a
 `npx -y lavish-axi ...`, run `lavish-axi ...` instead. Tools live in `~/.claude/skills/lavish/tools/`,
 their CLIs are on PATH via `~/.local/bin`.
 
+### No browser tab (Marcus, 2026-10-11)
+
+`lavish-axi` on this machine is the shim `tools/lavish-axi.mjs` (`~/.local/bin/lavish-axi` points at it): it runs the
+pinned, patched editor with `LAVISH_AXI_NO_OPEN` set, so **opening or resuming a session never opens a browser tab**.
+Marcus reads every plan and review page inside Manager Marcus's Plan tab (and on the Lavish home page); a tab per
+rebuild only stacked stale tabs on 127.0.0.1:4387 until Chrome's six-per-host pool was full and pages stopped loading.
+Pass `--open` only when he asks for a tab. Mention the page's place in Manager Marcus when handing it over, not a URL to
+open. Diagrams: author them as `pre.mmd` (the template does), never `.mermaid`, unless he asked for an editable
+whiteboard: the editor turns every `.mermaid` container into a 7.5 MB whiteboard frame with its own long-poll.
+
 ### Commands
 
 - **`lavish-poll <html-file> [--reply <n> "..."]... [--agent-reply "..."] [--label "..."]`** REPLACES
