@@ -200,7 +200,7 @@
 
   <section class="blk"><details data-sec="Design">
     <summary class="h"><span class="title">4 · Design</span><span class="sum">The target shape and how it differs from today.</span><span class="badges"><span>5 min</span></span></summary>
-    <div class="mermaid-frame"><pre class="mermaid">
+    <div class="mermaid-frame"><pre class="mmd">
 flowchart LR
   A[Today] --> B[Target]
     </pre></div>
@@ -213,7 +213,7 @@ flowchart LR
   <section class="blk"><details data-sec="Execution">
     <summary class="h"><span class="title">5 · Execution</span><span class="sum">Which agents are started, in what order and lanes, and what you will see in Manager Marcus while it runs.</span><span class="badges"><span>2 min</span></span></summary>
     <p>How the work is run, in two or three sentences someone could follow: who coordinates, how many workers there are, what runs side by side and what has to wait for something else.</p>
-    <div class="mermaid-frame"><pre class="mermaid">
+    <div class="mermaid-frame"><pre class="mmd">
 flowchart LR
   C[Coordinator] --> A1[Lane A · worker · PR1]
   C --> B1[Lane B · worker · PR2]
@@ -391,7 +391,7 @@ const escapeText = (t) => String(t).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<
 
 /* ---------- full-plan markdown export ---------- */
 const mermaidSources = [];
-document.querySelectorAll("pre.mermaid").forEach((p) => mermaidSources.push(p.innerHTML.replace(/<br\s*\/?>/gi, "<br/>").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").trim()));
+document.querySelectorAll("pre.mmd").forEach((p) => mermaidSources.push(p.innerHTML.replace(/<br\s*\/?>/gi, "<br/>").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").trim()));
 const cellText = (c) => c.textContent.replace(/\s+/g, " ").trim().replace(/\|/g, "\\|");
 function domToMd() {
   let md = "", mi = 0;
@@ -467,7 +467,10 @@ function sendExport() { window.lavish?.queuePrompt("Save this exported plan to a
 
 /* ---------- mermaid ---------- */
 mermaid.initialize({ startOnLoad: false, theme: "neutral", securityLevel: "loose" });
-mermaid.run({ querySelector: "pre.mermaid" });
+// Plain Mermaid outside a .mermaid container: inside the Lavish editor a .mermaid diagram becomes an Excalidraw whiteboard
+// frame (a 7.5 MB script and a long-poll connection per diagram, measured 2026-10-11), which starved the page inside the
+// Manager Marcus review frame. Use class "mermaid" only when the reader asked for an editable whiteboard.
+mermaid.run({ querySelector: "pre.mmd" });
 </script>
 <script>
 /* Built-in plan navigation: existing plans gain it without editing their files. */
