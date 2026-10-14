@@ -1505,7 +1505,7 @@ async function chatAction(s,action,body={}){
     // One request id per asked-for resume, kept while uncertain (contract 3): the replay above resolves it; the daemon resumes once per id.
     // A chat that is not the plan's own session names its session, and the prompt that reconnects it to its chat: the daemon resumes THAT session, in the terminal of this workspace that ran it, or refuses.
     const requestId=mmRandomUUID();
-    const ask={...(body.model?{model:String(body.model)}:{}),...(plansOwn?{}:{session:{provider:selected.agent.provider==='codex'?'codex':'claude',sessionId:sid},prompt:`Reconnect to the plan with lavish-poll ${JSON.stringify(s.resolved)} --chat ${selected.id}. Read its current state before editing.`})};
+    const ask={...(body.model?{model:String(body.model)}:{}),...(plansOwn?{}:{session:{provider:selected.agent.provider==='codex'?'codex':'claude',sessionId:sid},prompt:`Reconnect to the plan with lavish-poll ${JSON.stringify(s.resolved)} --chat ${selected.id}. Read its current state before you continue.`})};
     const a=await mmStart('resume',s.key,requestId,ask,MM_ACTION_TIMEOUT_MS);
     // A resume the daemon could not confirm (its screen was not recognised in time) happened all the same: its terminal runs in the workspace. The answer says so and points at the pane, where a person can see what it shows (review round 2, Q8).
     if(a&&a.done&&a.body.confirmed===false)return {ok:true,confirmed:false,message:`Session resumed in ${where}; its screen was not recognised yet, look at its pane.`,mm:{workspaceId:a.body.workspaceId,tmuxName:a.body.tmuxName,url:a.body.url}};
@@ -1552,7 +1552,7 @@ async function chatAction(s,action,body={}){
    if(action==='reconnect')return {error:`${rec.provider==='codex'?'Codex':'Claude'} session ${current.name} is running in ${chatPlace(selected).where}: go to it there. To have it listen to this plan, ask it to run lavish-poll ${JSON.stringify(s.resolved)} --chat ${selected.id}.`};
    return {error:`${rec.provider==='codex'?'Codex':'Claude'} session ${current.name} is open in its app. Open that session and ask it to run lavish-poll ${JSON.stringify(s.resolved)} --chat ${selected.id}. The app does not expose a safe terminal reconnect for this session.`};
   }
-  const reconnectPrompt=`Reconnect to the plan with lavish-poll ${JSON.stringify(s.resolved)} --chat ${selected.id}. Read its current state before editing.`;
+  const reconnectPrompt=`Reconnect to the plan with lavish-poll ${JSON.stringify(s.resolved)} --chat ${selected.id}. Read its current state before you continue.`;
   selectChat(s.key,selected.id);
   const r=await resumeAgent({agent:rec},s.key,{model:body.model||rec.model||'',effort:body.effort||rec.effort||'',prompt:reconnectPrompt},{live:liveCache,tmuxNames:liveCache.tmux});
   if(!r.ok){if(state.activeChatId&&state.activeChatId!==selected.id)selectChat(s.key,state.activeChatId);return {error:r.error};}
