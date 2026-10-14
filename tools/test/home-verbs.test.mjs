@@ -331,3 +331,35 @@ test('review round 2, Q8 · a resume the daemon could not confirm is a resume th
   assert.deepEqual(await post(home.port,'resume',{chatId:nw.body.chatId,where:'here'}),{status:200,body:{ok:true,confirmed:false,message:'Session resumed in its Manager Marcus workspace; its screen was not recognised yet, look at its pane.',mm:{workspaceId:'w-0a1b2c3d',tmuxName:'mm-claude-22222222',url}}});
  }finally{await home.stop();await mm.close();rmSync(dir,{recursive:true,force:true});}
 });
+
+/** One new-chat press on a fresh home whose plan a workspace holds at `flow`: the body Manager Marcus received. */
+async function newBody(flow,provider){
+ const dir=fixture();const mm=await stubDaemon({...HOLDER,flow},{new:NEW_OK},WORKSPACES);const home=await startHome(dir,mm.url);
+ try{
+  const r=await post(home.port,'new',{where:'here',provider});
+  assert.equal(r.status,200,JSON.stringify(r));
+  return {answer:r.body,body:mm.posts().filter(p=>p.url===`/api/plans/${KEY}/new`).at(-1).body};
+ }finally{await home.stop();await mm.close();rmSync(dir,{recursive:true,force:true});}
+}
+
+test('q4c · a new Claude chat here on a running plan asks Manager Marcus for a review agent: as review, the reserved chat id, a review name, no prompt; a draft plan or Codex keeps today\'s body',{timeout:60000},async()=>{
+ const {answer,body:b}=await newBody('executing','claude');
+ assert.equal(b.as,'review');assert.equal(b.chatId,b.requestId);assert.equal(b.chatId,answer.chatId);
+ assert.equal(b.name,'review '+b.chatId.slice(0,8));assert.equal(b.prompt,undefined);
+ assert.equal((await newBody('done','claude')).body.as,'review');
+ for(const [flow,provider] of [['draft','claude'],['executing','codex']]){
+  const {body}=await newBody(flow,provider);
+  assert.equal(body.as,undefined,flow+' '+provider);assert.equal(body.chatId,undefined);assert.match(body.prompt,/new chat for the same plan/);
+ }
+});
+
+test('q4c · Manager Marcus refusing the review agent is the home\'s answer, and the reservation is released',{timeout:30000},async()=>{
+ const dir=fixture();const mm=await stubDaemon({...HOLDER,flow:'executing'},{new:{status:409,body:{error:'this run has no approval bundle: there is nothing approved for a review agent to read'}}},WORKSPACES);
+ const home=await startHome(dir,mm.url);
+ try{
+  const before=(await chats(home.port)).activeChatId;
+  const r=await post(home.port,'new',{where:'here',provider:'claude'});
+  assert.equal(r.status,409);assert.match(r.body.error,/no approval bundle/);
+  const after=await chats(home.port);assert.equal(after.activeChatId,before);assert.equal(after.launch,null);
+ }finally{await home.stop();await mm.close();rmSync(dir,{recursive:true,force:true});}
+});

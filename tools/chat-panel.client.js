@@ -82,6 +82,11 @@ const LavishChatLogic=(function(){
    {id:'new',label:'New chat…',show:true,primary:false,...off(wait&&STILL,data&&data.launch&&'A chat is already starting.')},
   ];
  }
+ /** What the chooser's start button starts: on a running or done plan a new Claude chat here is its review agent (the home asks Manager Marcus for it); anything else is a plain chat. */
+ function startKind(data,where,provider){
+  const flow=data&&data.mm&&data.mm.flow;
+  return (flow==='executing'||flow==='done')&&where==='here'&&provider==='claude'?'review':'chat';
+ }
  /** Where the chooser stands: the last choice the home remembers for this plan when it can be honoured, else the workspace when one holds the plan, else Terminal.app. */
  function chooserWhere(data){
   if(!data||!data.mm)return 'terminal';
@@ -138,7 +143,7 @@ const LavishChatLogic=(function(){
   return `<div class="lc-links-head"><span>${escHtml(g.header)}</span><button type="button" data-links-toggle aria-expanded="${Boolean(open)}">${open?'Collapse all':'Expand all'}</button></div>`
    +(open?`<div class="lc-links-body">${g.prs.map(x=>`<div class="lc-link-group">${a(x.pr)}${sub(x.deployments)}</div>`).join('')}${g.other.length?`<div class="lc-link-group">${g.other.map(a).join('')}</div>`:''}</div>`:'');
  }
- return {STILL,UNKNOWN,unknownOf,timeWords,placeOf,aliveOf,line,verbs,chooserWhere,request,pageOrigin,after,chatLine,modelOptions,effortOptions,linkGroups,linksBlock};
+ return {STILL,UNKNOWN,unknownOf,timeWords,placeOf,aliveOf,line,verbs,startKind,chooserWhere,request,pageOrigin,after,chatLine,modelOptions,effortOptions,linkGroups,linksBlock};
 })();
 if(typeof globalThis!=='undefined')globalThis.__lavishChatLogic=LavishChatLogic;
 (function(){
@@ -174,7 +179,7 @@ if(typeof globalThis!=='undefined')globalThis.__lavishChatLogic=LavishChatLogic;
   +'<div class="lc-field"><span class="lc-label">Model</span><button type="button" class="lc-trigger" data-pick="model" aria-haspopup="listbox" aria-expanded="false"></button></div>'
   +'<div class="lc-field"><span class="lc-label">Effort</span><button type="button" class="lc-trigger" data-pick="effort" aria-haspopup="listbox" aria-expanded="false"></button></div>'
   +'<div class="lc-field"><span class="lc-label">Working folder</span><button type="button" class="lc-trigger" data-pick="cwd" aria-haspopup="listbox" aria-expanded="false"></button></div>'
-  +'<div class="row"><button type="button" data-start>Start new chat</button><button type="button" data-cancel>Cancel</button></div></div>'
+  +'<div class="row"><button type="button" data-start>Start new chat</button><button type="button" data-cancel>Cancel</button></div><div class="lc-reason" data-start-hint hidden></div></div>'
   +'<div class="saved-chat-notice" role="status"></div><div class="saved-chat-links" aria-label="Linked PRs and deployments"></div>';
  if(editor){document.getElementById('panelHead').after(controls);controls.addEventListener('pointerdown',e=>e.stopPropagation());}
  const $=q=>controls.querySelector(q);
@@ -283,6 +288,9 @@ if(typeof globalThis!=='undefined')globalThis.__lavishChatLogic=LavishChatLogic;
   label(effortTrigger,L.effortOptions(data,form.provider),form.effort);
   label(cwdTrigger,[{value:form.cwd,name:form.cwd===(data.cwd||'')?'The plan’s project folder':form.cwd,small:form.cwd===(data.cwd||'')?form.cwd:''}],form.cwd);
   $('[data-start]').disabled=busy;
+  const kind=L.startKind(data,where,form.provider),running=Boolean(data.mm&&(data.mm.flow==='executing'||data.mm.flow==='done'));
+  $('[data-start]').textContent=kind==='review'?'Start review chat':'Start new chat';
+  const hint=$('[data-start-hint]');hint.hidden=!running;hint.textContent=running?'Here on Claude starts a review agent: it answers on what was built and fixes nothing. Codex or Terminal.app starts a plain chat.':'';
   if(editor)document.body.classList.toggle('saved-chat-viewing-old',Boolean(chat&&!active));
   const messages=chat?.messages||[];
   const nextSig=selected+JSON.stringify(messages);

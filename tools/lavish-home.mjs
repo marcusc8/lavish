@@ -1458,7 +1458,9 @@ async function chatAction(s,action,body={}){
     const handoff=[s.plan.summary,...(s.reg.progress||[]).slice(-5).map(p=>p.text)].filter(Boolean).join('\n').slice(0,5000);
     const prompt=`Read the plan at ${s.resolved}. This is a new chat for the same plan. Preserve the plan and earlier chats.\nCurrent handoff:\n${handoff||'Read the plan for the current decisions and next steps.'}\nOpen it with lavish-axi and poll it using lavish-poll ${JSON.stringify(s.resolved)} --chat ${chat.id}. Use that --chat value on each poll. Report your understanding before continuing. ${String(body.prompt||'').slice(0,4000)}`;
     // The request id is the reservation's id: the daemon starts once per id (contract 2), so a late answer is never a second agent.
-    const a=await mmStart('new',s.key,chat.id,{provider,...(model?{model}:{}),...(effort?{effort}:{}),prompt,cwd:projectDir,name:mmChatName(chat.id)},MM_ACTION_TIMEOUT_MS);
+    // A running or done plan's new Claude chat here is its review agent: Manager Marcus writes its role contract and first prompt (q4b).
+    const review=(holder.flow==='executing'||holder.flow==='done')&&provider==='claude';
+    const a=await mmStart('new',s.key,chat.id,review?{provider,...(model?{model}:{}),...(effort?{effort}:{}),as:'review',chatId:chat.id,cwd:projectDir,name:`review ${String(chat.id).slice(0,8)}`}:{provider,...(model?{model}:{}),...(effort?{effort}:{}),prompt,cwd:projectDir,name:mmChatName(chat.id)},MM_ACTION_TIMEOUT_MS);
     if(a&&a.done){mmRecordNew(s.key,chat.id,provider,projectDir,a.body);return {ok:true,chatId:chat.id,message:`New chat started in ${where}. Waiting for its agent to connect.`,mm:{workspaceId:a.body.workspaceId,tmuxName:a.body.tmuxName,url:a.body.url}};}
     if(a&&a.error){failLaunch(s.key,chat.id,a.error);return {error:a.error};}
     // Timed out, or pending: uncertain until the daemon says (contract 3). The reservation stays; the replay of its id, by the next press and by the follow-up, resolves it; failLaunch is never called from here.

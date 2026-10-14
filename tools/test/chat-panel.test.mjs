@@ -189,3 +189,14 @@ test('the links block: folded to a header with one toggle; open, each PR with th
  assert.match(groups[2],/^<a href="https:\/\/vercel\.com\/plan-only"[^>]*>Vercel · vercel\.com\/plan-only<\/a><\/div>/);
  assert.equal(L.linksBlock([],false),'');assert.equal(L.linksBlock(undefined,true),'');
 });
+
+test('q4c · the start button starts a review agent only on a running or done plan, here, on Claude; verbs are unchanged',()=>{
+ const run=flow=>data({mm:{...MM,flow}});
+ assert.equal(L.startKind(run('executing'),'here','claude'),'review');
+ assert.equal(L.startKind(run('done'),'here','claude'),'review');
+ assert.equal(L.startKind(run('executing'),'here','codex'),'chat');
+ assert.equal(L.startKind(run('executing'),'terminal','claude'),'chat');
+ assert.equal(L.startKind(run('draft'),'here','claude'),'chat');
+ assert.equal(L.startKind(data(),'here','claude'),'chat');
+ assert.deepEqual(plain(L.verbs(run('executing'),'claude:'+SID)),plain(L.verbs(run('draft'),'claude:'+SID)));
+});
