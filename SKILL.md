@@ -270,6 +270,12 @@ Stock component-kit themes read as generic AI output. Artifacts should feel deli
 
 ## Plan-artifact template (local requirements, set 2026-07-22, skeleton approved 2026-09-02)
 
+**Review tabs (2026-10-14).** The template carries a `review-view` block before the Feedback log; when you copy the
+template to `<name>.html`, change `plan-template` in that block's script path to `<name>` (the two marker lines and the
+two lines between them otherwise stay exactly as they are). After the plan's first build, `review-changes page` writes
+`assets/<name>-review/view.js` beside it and the plan page shows Plan | Review N | Pull requests N, with comments and
+chat working on every tab because it is one Lavish page. A plan with no review yet shows no tabs.
+
 **Start every plan from `~/.claude/skills/lavish/tools/plan-template.html`** (copy it, keep it a single
 self-contained .html: vanilla JS, no build step, the Mermaid CDN as the only external dependency, opens
 directly with no server). Reference implementation of the skeleton: StyleManager
