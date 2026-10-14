@@ -440,8 +440,13 @@ export function diffLines(a, b) {
 
 /* ── artifact head metadata ───────────────────────────────────────────────── */
 function unescapeHtml(s) { return decodeEntities(String(s ?? "")); }
+/** Folders macOS guards with a privacy prompt. The home runs under launchd and calls readHead for every plan on every
+ * request; a synchronous open of a file in one of these can wait forever on a prompt nobody sees, freezing the whole
+ * home (2026-10-14: three old Codex plans under ~/Documents did). Such a plan is listed without its head. */
+const PRIVACY_GUARDED = ["Documents", "Desktop", "Downloads"].map((d) => join(os.homedir(), d) + "/");
 /** Reads the first 64 KB: <title>, lavish:* meta tags, description, and a summary fallback (the lede / first paragraph). */
 export function readHead(file, bytes = 65536) {
+  if (PRIVACY_GUARDED.some((p) => String(file).startsWith(p))) return { title: "", project: "", related: [], status: "", prs: [], summary: "" };
   try {
     const fd = openSync(file, "r"); const buf = Buffer.alloc(bytes); const n = readSync(fd, buf, 0, bytes, 0); closeSync(fd);
     const head = buf.toString("utf8", 0, n);
