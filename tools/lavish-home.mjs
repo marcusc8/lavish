@@ -39,8 +39,11 @@
  *   /api/registry/<key>       GET/POST plan status / PRs / summary · POST …/refresh-prs
  *   /api/versions/<key>       GET the version index · POST …/snapshot saves the file now if it changed
  *   /api/queue/<key>          GET/PUT/DELETE the rail's mirror of unsent comments, image copies and the card draft
+ *   GET  /flow/<key>          the editor's top-bar strip (package L): {held, workspace, flow, round, planner, reviewer, coordinator, sequence, models, errors}
+ *   POST /flow/<key>/<press>  review | approve | resume ({who}) | cancel | sequence ({steps}), forwarded to the workspace that holds the plan; the daemon's
+ *                             status and JSON as they came (404 no workspace holds it, 503 no daemon, 504 the press got no answer)
  *   /api/export/<key>/plan.md PUT the page's own Markdown of the plan (text/plain), used by the md export
- *   /export/<key>?format=html|pdf|md&include=chat,comments,notes[&plan=0][&inline=1]
+ *   /export/<key>?format=html|pdf|md&include=chat,comments,queued,notes[&plan=0][&inline=1]   queued = the home's copy of the rail's unsent comments
  *   /api/sessions             GET the plan list as JSON, with tags, tabs, build and agent {provider,id,state,name,model,terminal} per plan
  *   /health
  *
@@ -60,7 +63,7 @@ import {
   stateDir, readJson, writeJsonAtomic, readHistory, appendHistory, roundOf, readNotes, writeNotes, readRegistry, updateRegistry, STATUSES, PRIORITIES, normalizeStatus,
   readVersionIndex, versionPath, snapshotVersion, extractText, diffLines, readHead, extractPrMentions,
   gitInfo, gitLogForFile, gitStatusForFile, ghPrView, sha,
-  readQueue, writeQueue, deleteQueue, stageOf, subLabelOf, progressSummary, STAGES, STAGE_LABELS, decodeEntities,
+  readQueue, writeQueue, deleteQueue, liveQueued, queuedSection, stageOf, subLabelOf, progressSummary, STAGES, STAGE_LABELS, decodeEntities,
   readLayout, createTag, renameTag, deleteTag, tagPlan, setProjectOrder, setPlanOrder, tagsOf, tagList, applyOrder, agentLabel,
 } from "./lavish-lib.mjs";
 import {
@@ -1071,12 +1074,13 @@ function renderExport(s) {
   return `<details class="fold" id="export"><summary>Export <span class="meta">the plan alone by default; tick what to append, or untick the plan for the review material only</span></summary><div class="in">
   <form class="xform box" method="get" action="/export/${s.key}" target="_blank" onsubmit="this.include.value=[...this.querySelectorAll('input[name=include]:checked')].map(c=>c.value).join(',')">
     <div class="row"><span>Format</span><label><input type="radio" name="format" value="md" checked> Markdown</label><label><input type="radio" name="format" value="html"> HTML (self-contained)</label><label><input type="radio" name="format" value="pdf"> PDF</label></div>
-    <div class="row"><span>Content</span><label><input type="checkbox" name="planbox" checked onchange="this.form.plan.value=this.checked?'1':'0'"> the plan</label>${chk("chat", "agent conversation")}${chk("comments", "comments sent")}${chk("notes", "private notes")}<input type="hidden" name="include" value=""><input type="hidden" name="plan" value="1"></div>
+    <div class="row"><span>Content</span><label><input type="checkbox" name="planbox" checked onchange="this.form.plan.value=this.checked?'1':'0'"> the plan</label>${chk("chat", "agent conversation")}${chk("comments", "comments sent")}${chk("queued", `Queued notes (not yet sent) · ${liveQueued(s.unsent).length}`)}${chk("notes", "private notes")}<input type="hidden" name="include" value=""><input type="hidden" name="plan" value="1"></div>
     <div class="row"><button class="b" type="submit">Download</button><a class="a" href="/export/${s.key}?format=html&inline=1" target="_blank">Preview HTML</a><span class="meta">PDF renders with the headless Chromium on this machine; Markdown from here uses the page's own converter run headlessly (open the plan in Lavish and export there for the fastest path).</span></div>
   </form></div></details>`;
 }
 
 /* ── export: the plan as html / pdf / md, plus optional appendices ─────── */
+const EXPORT_PARTS = ["chat", "comments", "queued", "notes"];
 const exportsDir = (key) => join(stateDir, "exports", key);
 const localBinEnv = () => ({ ...process.env, PATH: `${join(os.homedir(), ".local/bin")}:${process.env.PATH || ""}` });
 /** Lavish's own bundler (inlines local assets, keeps CDN refs); works without the Lavish server. Falls back to the raw file. */
@@ -1117,12 +1121,13 @@ function appendixHtml(s, include) {
       return `<div class="lx-msg you"><small>${esc(h.tag || "annotation")}${h.where ? ` · “${esc(String(h.where).slice(0, 100))}”` : ""} · ${esc(fmt(h.at))}</small>${esc(h.text)}${files ? `<div class="lx-files">${files}</div>` : ""}${replies}</div>`;
     }).join("") : `<p class="lx-empty">None.</p>`));
   }
+  if (include.has("queued")) parts.push(queuedSection(s.unsent, "html", { fmt }));
   if (include.has("notes")) {
     const priv = s.notes.filter((n) => !n.sentAt);
     parts.push(`<h2>Private notes</h2>` + (priv.length ? priv.map((n) => `<div class="lx-msg note"><small>${esc(n.state || "private")}${n.anchor?.text ? ` · “${esc(String(n.anchor.text).slice(0, 100))}”` : ""} · ${esc(fmt(n.updated || n.created))}</small>${esc(n.body)}${(n.attachments || []).length ? `<div class="lx-files">${n.attachments.map((a) => imgTag(dataUri(homeFilePath(s.key, a.id)), a.name)).join("")}</div>` : ""}</div>`).join("") : `<p class="lx-empty">None.</p>`));
   }
   if (!parts.length) return "";
-  return `<section id="lavish-appendix"><style>#lavish-appendix{max-width:880px;margin:40px auto 80px;padding:0 28px;font:15px/1.5 "Avenir Next","Helvetica Neue",system-ui,sans-serif;color:#1c1b1a;border-top:1px solid #e6e3dd}#lavish-appendix h2{font:600 22px "Iowan Old Style","Palatino Linotype",Georgia,serif;margin:28px 0 10px}#lavish-appendix .lx-msg{margin:0 0 10px;padding:9px 12px;border-radius:8px;background:#f3f1ec;white-space:pre-wrap}#lavish-appendix .lx-msg.agent{background:#e4ecf4}#lavish-appendix .lx-msg.note{background:#fff;border:1px solid #e6e3dd}#lavish-appendix .lx-msg small{display:block;font-size:11px;color:#7a7772;margin-bottom:3px;white-space:normal}#lavish-appendix .lx-reply{margin-top:6px;padding:5px 9px;background:#fff;border-radius:6px;color:#4a4845}#lavish-appendix .lx-files{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}#lavish-appendix .lx-files img{max-width:220px;max-height:160px;border-radius:6px;border:1px solid #e6e3dd}#lavish-appendix .lx-empty,#lavish-appendix .lx-missing{color:#7a7772;font-style:italic}#lavish-appendix .lx-head small{color:#7a7772;font-size:12px}</style><div class="lx-head"><small>Appendix exported ${esc(fmt(new Date()))} from the Lavish home page</small></div>${parts.join("")}</section>`;
+  return `<section id="lavish-appendix"><style>#lavish-appendix{max-width:880px;margin:40px auto 80px;padding:0 28px;font:15px/1.5 "Avenir Next","Helvetica Neue",system-ui,sans-serif;color:#1c1b1a;border-top:1px solid #e6e3dd}#lavish-appendix h2{font:600 22px "Iowan Old Style","Palatino Linotype",Georgia,serif;margin:28px 0 10px}#lavish-appendix .lx-msg{margin:0 0 10px;padding:9px 12px;border-radius:8px;background:#f3f1ec;white-space:pre-wrap}#lavish-appendix .lx-msg.agent{background:#e4ecf4}#lavish-appendix .lx-msg.note{background:#fff;border:1px solid #e6e3dd}#lavish-appendix .lx-msg small{display:block;font-size:11px;color:#7a7772;margin-bottom:3px;white-space:normal}#lavish-appendix .lx-reply{margin-top:6px;padding:5px 9px;background:#fff;border-radius:6px;color:#4a4845}#lavish-appendix .lx-files{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}#lavish-appendix .lx-files img{max-width:220px;max-height:160px;border-radius:6px;border:1px solid #e6e3dd}#lavish-appendix .lx-lead{color:#7a7772;font-size:13px;margin:-4px 0 10px}#lavish-appendix .lx-empty,#lavish-appendix .lx-missing{color:#7a7772;font-style:italic}#lavish-appendix .lx-head small{color:#7a7772;font-size:12px}</style><div class="lx-head"><small>Appendix exported ${esc(fmt(new Date()))} from the Lavish home page</small></div>${parts.join("")}</section>`;
 }
 /** A standalone document of the review material only (no plan): the appendix in the plan's paper style. */
 function reviewHtml(s, include) {
@@ -1192,6 +1197,7 @@ function appendixMd(s, include) {
   const items = transcript(s);
   if (include.has("chat")) { out.push("## Agent conversation", ""); for (const i of items.filter((i) => i.role === "agent" || i.role === "system" || i.kind === "message")) out.push(`**${i.role === "agent" ? "Agent" : i.role === "system" ? "System" : "You"}** · ${i.at}`, "", i.text, ""); }
   if (include.has("comments")) { out.push("## Comments sent to the agent", ""); for (const h of s.history.filter((h) => h.role === "user" && h.kind !== "message")) { out.push(`- **${h.tag || "annotation"}**${h.where ? ` on “${String(h.where).slice(0, 80)}”` : ""} (${h.at}): ${h.text}`); for (const r of sentNoteFor(s, h)?.replies || []) out.push(`  - ↳ ${r.text}`); } out.push(""); }
+  if (include.has("queued")) out.push(queuedSection(s.unsent, "md"));
   if (include.has("notes")) { out.push("## Private notes", ""); for (const n of s.notes.filter((n) => !n.sentAt)) out.push(`- **${n.state || "private"}**${n.anchor?.text ? ` on “${String(n.anchor.text).slice(0, 80)}”` : ""}: ${n.body}${(n.attachments || []).map((a) => ` ![${a.name}](${a.url})`).join("")}`); out.push(""); }
   return out.join("\n");
 }
@@ -1410,6 +1416,52 @@ function mmPlace(key){
  })();
  mmPlaces.set(key,{at:0,pending});return pending;
 }
+/* ── The plan's flow in the editor's top bar (package L): GET /flow/<key> for the strip, POST /flow/<key>/<press> for its presses ── */
+/** The presses the editor may forward, each with the one field it may carry (`who` on a resume, `steps` on a sequence): the daemon refuses any other field, so nothing else is passed on. */
+const FLOW_PRESSES={review:null,approve:null,resume:'who',cancel:null,sequence:'steps'};
+/** A job of the daemon's Settings in words ("codex gpt-6-astra high"); null when it names no model. */
+const jobWords=j=>j&&typeof j.model==='string'&&j.model?[j.provider,j.model,j.effort].filter(x=>typeof x==='string'&&x).join(' '):null;
+/** Whether a terminal of the workspace runs, on the daemon's word: true, false, or null when it cannot tell. A terminal the workspace does not list does not run there. */
+const liveOf=t=>!t?false:t.liveness==='alive'?true:t.liveness==='ended'?false:null;
+/**
+ * The strip's one answer, from the daemon's three reads (each a mmFetch answer, or null when it did not answer): which
+ * workspace holds the plan (`held` is the daemon's word; null when it could not be asked), the plan's flow and sessions
+ * from the workspace list, the presses' models from Settings. A read that failed leaves its fields null and says why in
+ * `errors`; it is never taken for "nothing there".
+ */
+function flowView(key,h,w,st){
+ const errors=[],out={held:null,workspace:null,flow:null,round:null,planner:null,reviewer:null,coordinator:null,sequence:null,models:null,errors};
+ if(!h){errors.push(`Manager Marcus is not answering at ${MM_URL}: whether a workspace holds this plan is not known.`);return out;}
+ if(h.status===404){out.held=false;return out;}
+ const hb=h.body;
+ if(h.status!==200||!hb||!hb.workspace||typeof hb.workspace.id!=='string'){errors.push(`Manager Marcus answered ${h.status} when asked which workspace holds this plan${hb&&typeof hb.error==='string'?': '+hb.error:''}.`);return out;}
+ out.held=true;out.workspace={id:hb.workspace.id,title:String(hb.workspace.title||hb.workspace.id)};out.flow=typeof hb.flow==='string'?hb.flow:null;
+ const ws=w&&w.status===200&&w.body&&Array.isArray(w.body.projects)?w.body.projects.flatMap(p=>p&&Array.isArray(p.workspaces)?p.workspaces:[]).find(x=>x&&x.id===hb.workspace.id):null;
+ const tie=ws&&Array.isArray(ws.plans)?ws.plans.find(p=>p&&p.planKey===key):null;
+ if(!ws||!Array.isArray(ws.terminals)||!tie){
+  errors.push(!w?'Manager Marcus did not answer the list of workspaces: the plan\'s sessions are not known.':w.status!==200?`Manager Marcus answered ${w.status} to the list of workspaces: the plan's sessions are not known.`:'The list of workspaces does not show this plan in its workspace: the plan\'s sessions are not known.');
+  // The holder's own terminal still says where the planner is, when it is the planner's.
+  if(hb.who==='planner'&&hb.terminal&&typeof hb.terminal.tmuxName==='string')out.planner={model:null,tmuxName:hb.terminal.tmuxName,alive:hb.terminal.alive===true?true:hb.terminal.alive===false?false:null};
+ }else{
+  const fd=tie.flowData&&typeof tie.flowData==='object'?tie.flowData:{};
+  if(typeof tie.flow==='string')out.flow=tie.flow;
+  const byName=n=>typeof n==='string'?ws.terminals.find(t=>t&&t.tmuxName===n)||null:null;
+  const sid=fd.planner&&typeof fd.planner.sessionId==='string'?fd.planner.sessionId:'';
+  const pt=(sid&&ws.terminals.find(t=>t&&t.sessionId===sid))||(hb.who==='planner'&&hb.terminal?byName(hb.terminal.tmuxName):null);
+  if(pt||sid)out.planner={model:pt&&typeof pt.model==='string'?pt.model:null,tmuxName:pt?pt.tmuxName:null,alive:liveOf(pt)};
+  if(Number.isInteger(fd.rounds))out.round=fd.rounds;
+  const r=fd.reviewer,c=fd.coordinator;
+  if(r&&typeof r.tmuxName==='string')out.reviewer={model:typeof r.model==='string'?r.model:null,tmuxName:r.tmuxName,round:Number.isInteger(fd.rounds)?fd.rounds:1,alive:r.state==='stopped'?false:liveOf(byName(r.tmuxName))};
+  if(c&&typeof c.tmuxName==='string')out.coordinator={state:typeof c.state==='string'?c.state:null,model:typeof c.model==='string'?c.model:null,tmuxName:c.tmuxName,alive:liveOf(byName(c.tmuxName))};
+  // The steps the plan was asked to take (the daemon's flowData.sequence: {steps, state, at, reason?}), as the record holds them.
+  const q=fd.sequence;
+  if(q&&typeof q.steps==='string'&&typeof q.state==='string')out.sequence={steps:q.steps,state:q.state,at:Number.isFinite(q.at)?q.at:null,...(typeof q.reason==='string'?{reason:q.reason}:{})};
+ }
+ const jobs=st&&st.status===200&&st.body?((st.body.settings||st.body).jobs||{}).jobs:null;
+ if(jobs&&typeof jobs==='object')out.models={review:jobWords(jobs['plan reviewer']),coordinator:jobWords(jobs['plan coordinator'])};
+ else errors.push(!st?'Manager Marcus did not answer for its Settings: the models the presses use are not known.':`Manager Marcus answered ${st.status} for its Settings: the models the presses use are not known.`);
+ return out;
+}
 
 const launchLocks=new Set();
 async function chatAction(s,action,body={}){
@@ -1568,7 +1620,7 @@ http.createServer(async (req, res) => {
     const path = url.pathname;
     let m;
     cors(req, res);
-    if(req.method==='POST'&&(/^\/api\/chats\//.test(path)||/^\/(connect|restart)\//.test(path))&&req.headers.origin&&!LOOPBACK.test(req.headers.origin))return json(res,403,{error:'Connection changes must come from the local Lavish page.'});
+    if(req.method==='POST'&&(/^\/api\/chats\//.test(path)||/^\/(connect|restart|flow)\//.test(path))&&req.headers.origin&&!LOOPBACK.test(req.headers.origin))return json(res,403,{error:'Connection changes must come from the local Lavish page.'});
     if (req.method === "OPTIONS") { res.writeHead(204); return res.end(); }
     if(path==='/plan-ui.js'||path==='/chat-panel.client.js'){return send(res,200,'application/javascript',readFileSync(fileURLToPath(new URL('.'+path,import.meta.url)),'utf8'));}
     if (path === "/health") return json(res, 200, { ok: true, app: "lavish-home", sessions: Object.keys(readJson(join(stateDir, "state.json"), { sessions: {} }).sessions || {}).length, agentScan: lastAgentScan });
@@ -1596,11 +1648,15 @@ http.createServer(async (req, res) => {
       const dir = join(stateDir, "notes", `${m[1]}.files`);
       if (req.method === "PUT" && !m[2]) {
         const name = String(url.searchParams.get("name") || "image").replace(/[^\w.\- ]+/g, "_").slice(0, 120);
-        const type = String(req.headers["content-type"] || "application/octet-stream").split(";")[0].trim();
-        if (!/^image\//.test(type)) return json(res, 415, { error: "only images are stored as private attachments" });
+        // An image by its type; a file (PDF, Markdown, text, CSV, JSON) by its name, since a browser often gives a .md no type.
+        const sent = String(req.headers["content-type"] || "application/octet-stream").split(";")[0].trim().toLowerCase();
+        const fileExt = ((/\.(pdf|md|markdown|txt|csv|json)$/i.exec(name) || [])[1] || (sent === "application/pdf" ? "pdf" : "")).toLowerCase();
+        const FILE_TYPES = { pdf: "application/pdf", md: "text/markdown; charset=utf-8", markdown: "text/markdown; charset=utf-8", txt: "text/plain; charset=utf-8", csv: "text/csv; charset=utf-8", json: "application/json; charset=utf-8" };
+        const type = /^image\//.test(sent) ? sent : FILE_TYPES[fileExt] || "";
+        if (!type) return json(res, 415, { error: "only images, PDFs and text files (.md, .txt, .csv, .json) are stored as private attachments" });
         const body = await readRawBody(req, 25 * 1024 * 1024);
-        if (!body) return json(res, 413, { error: "image larger than 25 MB" });
-        const ext = { "image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif", "image/svg+xml": ".svg" }[type] || "";
+        if (!body) return json(res, 413, { error: "file larger than 25 MB" });
+        const ext = { "image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif", "image/svg+xml": ".svg" }[type] || (fileExt ? "." + fileExt : "");
         const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
         mkdirSync(dir, { recursive: true });
         writeFileSync(join(dir, `${id}${ext}`), body);
@@ -1612,13 +1668,35 @@ http.createServer(async (req, res) => {
       const file = meta ? readdirSync(dir).find((f) => f.startsWith(m[2]) && !f.endsWith(".json")) : null;
       if (!meta || !file) return json(res, 404, { error: "no such file" });
       if (req.method === "DELETE") { try { unlinkSync(join(dir, file)); unlinkSync(join(dir, `${m[2]}.json`)); } catch {} return json(res, 200, { deleted: m[2] }); }
-      res.writeHead(200, { "content-type": meta.type || "application/octet-stream", "cache-control": "private, max-age=86400", "content-disposition": `inline; filename="${meta.name.replace(/"/g, "")}"` });
+      res.writeHead(200, { "content-type": meta.type || "application/octet-stream", "x-content-type-options": "nosniff", "cache-control": "private, max-age=86400", "content-disposition": `inline; filename="${meta.name.replace(/"/g, "")}"` });
       return createReadStream(join(dir, file)).pipe(res);
     }
     if ((m = /^\/api\/notes\/([0-9a-f]{16})$/.exec(path))) {
       if (req.method === "GET") return json(res, 200, readNotes(m[1]));
       if (req.method === "PUT") { const body = parseBody(await readBody(req), req.headers["content-type"]); return json(res, 200, writeNotes(m[1], body.notes)); }
       return json(res, 405, { error: "GET or PUT" });
+    }
+    if((m=/^\/flow\/([0-9a-f]{16})(?:\/([a-z-]+))?$/.exec(path))){
+      const key=m[1],press=m[2];
+      if(!press){
+        if(req.method!=='GET')return json(res,405,{error:'GET the flow, or POST /flow/<key>/<press>'});
+        const h=await mmFetch(`/api/plans/${key}`);
+        const [w,st]=h&&h.status===200?await Promise.all([mmFetch('/api/workspaces'),mmFetch('/api/settings')]):[null,null];
+        return json(res,200,flowView(key,h,w,st));
+      }
+      if(req.method!=='POST')return json(res,405,{error:'POST a press'});
+      if(!Object.hasOwn(FLOW_PRESSES,press))return json(res,400,{error:`No press "${press}": review, approve, resume, cancel or sequence.`});
+      const body=parseBody(await readBody(req),req.headers['content-type']);
+      const h=await mmFetch(`/api/plans/${key}`);
+      if(!h)return json(res,503,{error:`Manager Marcus is not answering at ${MM_URL}: nothing was sent.`});
+      if(h.status===404)return json(res,404,{error:'No Manager Marcus workspace holds this plan: nothing was sent.'});
+      if(h.status!==200||!h.body||!h.body.workspace||typeof h.body.workspace.id!=='string')return json(res,503,{error:h.body&&typeof h.body.error==='string'?h.body.error:`Manager Marcus answered ${h.status} when asked which workspace holds this plan: nothing was sent.`});
+      const field=FLOW_PRESSES[press],sent=field&&body[field]!==undefined?{[field]:body[field]}:{};
+      const r=await mmFetch(`/api/workspaces/${encodeURIComponent(h.body.workspace.id)}/plans/${key}/flow/${press}`,{method:'POST',body:JSON.stringify(sent)},MM_ACTION_TIMEOUT_MS);
+      mmPlaces.delete(key);
+      // A press that got no answer may still have been taken: it is said as not known, never as refused (the strip reads the plan again).
+      if(!r)return json(res,504,{error:`Manager Marcus did not answer the press within ${MM_ACTION_TIMEOUT_MS/1000} s: whether it acted is not known.`});
+      return json(res,r.status,r.body??{error:`Manager Marcus answered ${r.status} with no JSON.`});
     }
     await refreshLive();
     if((m=/^\/api\/chats\/([0-9a-f]{16})(?:\/(new|resume|reconnect))?$/.exec(path))){
@@ -1811,10 +1889,11 @@ http.createServer(async (req, res) => {
     if ((m = /^\/export\/([0-9a-f]{16})$/.exec(path))) {
       const s = sessions.find((x) => x.key === m[1]); if (!s || !s.exists) return send(res, 404, "text/plain", "no such session or file missing");
       const format = ["html", "pdf", "md"].includes(url.searchParams.get("format")) ? url.searchParams.get("format") : "html";
-      const include = new Set(String(url.searchParams.get("include") || "").split(",").map((x) => x.trim()).filter((x) => ["chat", "comments", "notes"].includes(x)));
+      // getAll: the form sends one include per ticked box, a link one comma list; both are read.
+      const include = new Set(url.searchParams.getAll("include").join(",").split(",").map((x) => x.trim()).filter((x) => EXPORT_PARTS.includes(x)));
       const withPlan = url.searchParams.get("plan") !== "0";
-      if (!withPlan && !include.size) return send(res, 400, "text/plain; charset=utf-8", "Nothing to export: tick at least one of chat, comments, notes when the plan is left out.");
-      const stem = basename(s.resolved, ".html") + (withPlan ? ".export" : ".review") + ["chat", "comments", "notes"].filter((x) => include.has(x)).map((x) => "+" + x).join("");
+      if (!withPlan && !include.size) return send(res, 400, "text/plain; charset=utf-8", "Nothing to export: tick at least one of chat, comments, queued, notes when the plan is left out.");
+      const stem = basename(s.resolved, ".html") + (withPlan ? ".export" : ".review") + EXPORT_PARTS.filter((x) => include.has(x)).map((x) => "+" + x).join("");
       const inline = url.searchParams.get("inline") === "1";
       const disp = (ext) => (inline ? {} : { "content-disposition": `attachment; filename="${stem}.${ext}"` });
       if (format === "md") {
