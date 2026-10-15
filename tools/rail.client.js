@@ -176,6 +176,7 @@
     const list = [];
     queued.forEach((p, index) => {
       if ((p.tag === "message" && !p.selector) || p.tag === "verdict") return; // composer messages and verdicts are not comments
+      if (p.lavishFollowOf && notes.some((n) => n.id === p.lavishFollowOf)) return; // a follow-up shows inside its card
       list.push({ kind: "queued", id: "q:" + index, index, anchor: anchorOf(p), body: String(p.prompt || ""), at: "", files: refsOf(p) });
     });
     for (const n of notes) list.push({ kind: n.state === "sent" ? "sent" : n.state === "resolved" ? "resolved" : "private", id: n.id, note: n, anchor: n.anchor || null, body: String(n.body || ""), at: n.updated || n.created || "", files: Array.isArray(n.attachments) ? n.attachments : [] });
@@ -211,8 +212,11 @@
       actions = a("edit", "Edit") + a("private", "Keep private", "Take it out of the send queue and keep it as a private comment") + a("remove", "Remove");
     } else if (c.kind === "private") {
       actions = a("edit", "Edit") + (ended ? "" : a("queue", "Queue to agent", "Move it into the send queue")) + a("delete", "Delete");
+    } else if (c.kind === "sent" && editingId === "f:" + c.id) {
+      const f = (act, label, title) => '<button type="button" data-act="' + act + '" data-id="' + esc("f:" + c.id) + '" title="' + esc(title) + '">' + label + "</button>";
+      actions = f("save", "Queue", "Enter or \u2318/Ctrl+Enter: queue it; Send to Agent sends it") + f("cancel", "Cancel", "Esc") + '<span class="lavish-card-hint">Enter queues \u00b7 Shift+Enter new line \u00b7 Esc cancels</span>';
     } else if (c.kind === "sent") {
-      actions = (ended ? "" : a("followup", "Follow up", "Queue a follow-up on the same element")) + a("resolve", "Resolve") + a("delete", "Delete");
+      actions = (ended ? "" : a("followup", "Follow up", "Continue this conversation in this card")) + a("resolve", "Resolve") + a("delete", "Delete");
     } else {
       actions = a("reopen", "Reopen") + a("delete", "Delete");
     }
@@ -220,7 +224,9 @@
     if (editing) body = '<textarea class="lavish-card-edit" data-id="' + esc(c.id) + '" rows="4" placeholder="Write the comment\u2026 (paste an image to attach it)">' + esc(editDrafts.has(c.id) ? editDrafts.get(c.id) : c.body) + "</textarea>";
     else if (isSuggestion) body = '<div class="lavish-card-body lavish-card-suggestion"><del>' + esc(trunc(c.anchor.text, 160)) + "</del><ins>" + esc(c.body) + "</ins></div>";
     else body = '<div class="lavish-card-body">' + (c.body ? esc(c.body) : c.files.length ? "" : "<i>(empty)</i>") + "</div>";
-    const replies = (c.note?.replies || []).map((r) => '<div class="lavish-card-reply"><small>Agent \u00b7 ' + esc(fmtTime(r.at)) + "</small>" + esc(r.text) + "</div>").join("");
+    const replies = (c.note ? followThread(c.note, queued) : []).map((t) => '<div class="lavish-card-reply' + (t.by === "you" ? " is-you" : "") + '"><small>' + (t.by === "you" ? "You" + (t.queued ? " \u00b7 queued, not sent" : "") : "Agent") + (t.at ? " \u00b7 " + esc(fmtTime(t.at)) : "") + "</small>" + esc(t.text) +
+      (t.queued ? ' <button type="button" class="lavish-card-reply-x" data-act="remove" data-id="q:' + t.qi + '">Remove</button>' : "") + "</div>").join("") +
+      (c.kind === "sent" && editingId === "f:" + c.id ? '<textarea class="lavish-card-edit lavish-card-followup" data-id="' + esc("f:" + c.id) + '" rows="2" placeholder="Continue the conversation\u2026">' + esc(editDrafts.get("f:" + c.id) || "") + "</textarea>" : "");
     const meta = c.kind === "sent" && c.note?.sentAt ? "sent " + fmtTime(c.note.sentAt) : c.at ? fmtTime(c.at) : "";
     return '<div class="lavish-card is-' + c.kind + (detached ? " is-detached" : "") + (editing ? " is-editing" : "") + (selectedId === c.id ? " is-active" : "") + '" data-id="' + esc(c.id) + '" tabindex="0">' +
       '<div class="lavish-card-top">' + (n ? '<span class="lavish-card-n">' + n + "</span>" : "") + '<span class="lavish-chip">' + (detached ? "Detached" : chip) + '</span><span class="lavish-card-anchor" title="' + esc(c.anchor?.selector || "") + '">' + (isSuggestion ? "edit" : where) + "</span></div>" +
@@ -263,6 +269,7 @@
     }
     homeLink?.classList.toggle("is-off", synced === false);
     requestAnchors();
+    postNotesToFrame();
   }
   const cssEscape = (s) => (window.CSS && CSS.escape ? CSS.escape(s) : String(s).replace(/["\\]/g, "\\$&"));
   /** The edit box is as tall as its text: it wraps inside the card and grows downward, never sideways; the list keeps its scroll position. */
@@ -412,6 +419,7 @@
   const queuedIndex = (id) => (String(id).startsWith("q:") ? Number(String(id).slice(2)) : -1);
   function openEdit(id) { editingId = id; editDrafts.delete(id); setRailOpen(true, false); renderRail(); focusEditor(id); }
   function saveEdit(id) {
+    if (String(id).startsWith("f:")) { queueFollowUp(String(id).slice(2)); return; }
     const ta = listEl.querySelector('.lavish-card-edit[data-id="' + cssEscape(id) + '"]');
     const text = ta ? ta.value.trim() : "";
     const qi = queuedIndex(id);
@@ -453,7 +461,7 @@
         busy--;
         enqueuePrompt(promptFrom(anchor, n.body, refs)); notes = notes.filter((x) => x !== n); saveNotes(); renderRail();
       } break;
-      case "followup": if (n && !ended) { enqueuePrompt(promptFrom(anchor, "Follow-up on my earlier note (\u201c" + trunc(n.body, 60) + "\u201d): ")); openEdit("q:" + (queued.length - 1)); } break;
+      case "followup": if (n && !ended) { editingId = "f:" + n.id; setRailOpen(true, false); renderRail(); focusEditor("f:" + n.id); } break;
       case "resolve": if (n) { n.state = "resolved"; n.updated = now(); saveNotes(); renderRail(); } break;
       case "reopen": if (n) { n.state = n.sentAt ? "sent" : "private"; n.updated = now(); saveNotes(); renderRail(); } break;
       case "delete": if (n) { notes = notes.filter((x) => x !== n); saveNotes(); renderRail(); } break;
@@ -507,13 +515,50 @@
     })();
     return n;
   }
+  /* ── follow-ups (Marcus, 2026-10-15): Follow up continues the same card's conversation ── */
+  /** The card's conversation after its first comment, oldest first: your follow-ups and the agent's replies, then your queued follow-ups. */
+  function followThread(n, queuedList) {
+    const out = [...(n.follows || []).map((f) => ({ by: "you", at: f.at, text: f.text })), ...(n.replies || []).map((r) => ({ by: "agent", at: r.at, text: r.text }))]
+      .sort((a, b) => String(a.at || "").localeCompare(String(b.at || "")));
+    (queuedList || []).forEach((p, qi) => { if (p && p.lavishFollowOf === n.id) out.push({ by: "you", at: "", text: String(p.lavishFollowText ?? p.prompt ?? ""), queued: true, qi }); });
+    return out;
+  }
+  /** A delivered follow-up joins its card's conversation instead of becoming a card of its own; false when that card is gone. */
+  function foldFollowUp(list, p, at) {
+    const n = p && p.lavishFollowOf ? list.find((x) => x.id === p.lavishFollowOf && x.sentAt) : null;
+    if (!n) return false;
+    n.follows = [...(n.follows || []), { at, text: String(p.lavishFollowText ?? p.prompt ?? "") }];
+    n.updated = at;
+    return true;
+  }
+  /** What a page's own review cards show (render.py's view, page.js): queued and sent comments on its elements, each with its conversation. */
+  function railNotes(cardList, queuedList) {
+    return cardList.filter((c) => (c.kind === "queued" || c.kind === "sent") && c.anchor?.selector && c.anchor?.tag !== "choice" && !/^(verdict|pick):/.test(c.key || ""))
+      .map((c) => ({ selector: c.anchor.selector, state: c.kind, text: c.body, at: c.kind === "sent" ? c.note?.sentAt || "" : "", thread: c.note ? followThread(c.note, queuedList).map(({ qi, ...t }) => t) : [] }));
+  }
+  /* ── end follow-ups ── */
+  function queueFollowUp(noteId) {
+    const fid = "f:" + noteId;
+    const ta = listEl.querySelector('.lavish-card-edit[data-id="' + cssEscape(fid) + '"]');
+    const text = ta ? ta.value.trim() : "";
+    editingId = null; editDrafts.delete(fid);
+    const n = noteById(noteId);
+    // An empty box queues nothing: a follow-up is what you typed, sent on the same element as the card.
+    if (n && text && !ended) enqueuePrompt({ ...promptFrom(n.anchor, text), lavishFollowOf: n.id, lavishFollowText: text });
+    renderRail();
+  }
+  function postNotesToFrame() {
+    try { frame?.contentWindow?.postMessage({ type: "lavish:railNotes", notes: railNotes(cards(), queued) }, "*"); } catch { /* a frame between loads */ }
+  }
+  try { frame?.addEventListener("load", postNotesToFrame); } catch { /* no frame */ }
   /** "↳ Re “start of the comment”: reply" → attach to the sent card whose text starts that way. */
   function threadReply(text, at) {
     const m = /^\u21b3\s*Re\s+[\u201c"](.+?)[\u201d"]:\s*([\s\S]+)$/.exec(String(text || "").trim());
     if (!m) return false;
     const quote = norm(m[1]).replace(/\s*\u2026$/, "");
     const reply = m[2].trim();
-    const n = notes.find((x) => x.sentAt && (norm(x.body).startsWith(quote) || norm(x.anchor?.text || "").startsWith(quote)));
+    const n = notes.find((x) => x.sentAt && (x.follows || []).some((f) => norm(f.text).startsWith(quote))) ||
+      notes.find((x) => x.sentAt && (norm(x.body).startsWith(quote) || norm(x.anchor?.text || "").startsWith(quote)));
     if (!n) return false;
     n.replies = Array.isArray(n.replies) ? n.replies : [];
     if (!n.replies.some((r) => r.text === reply)) { n.replies.push({ at: at || now(), text: reply }); n.updated = now(); saveNotes(); renderRail(); }
@@ -868,6 +913,7 @@
         if (p.tag === "message" && !p.selector) continue; // the composer already added its bubble
         addChat("user", p.tag === "verdict" ? summarize({ ...p, text: p.prompt }) : summarize(p), true, "annotation");
         if (p.tag === "verdict") continue;
+        if (foldFollowUp(notes, p, now())) { changed = true; continue; }
         const refs = refsOf(p).map((r) => { const c = homeCopies[r.id]; return c?.url ? { id: r.id, name: r.name, url: c.url } : r; });
         notes.push({ id: uid(), state: "sent", anchor: anchorOf(p), body: String(p.prompt || ""), created: now(), updated: now(), sentAt: now(), ...(refs.length ? { attachments: refs } : {}) });
         changed = true;
