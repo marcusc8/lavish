@@ -177,7 +177,7 @@
     queued.forEach((p, index) => {
       if ((p.tag === "message" && !p.selector) || p.tag === "verdict") return; // composer messages and verdicts are not comments
       if (p.lavishFollowOf && notes.some((n) => n.id === p.lavishFollowOf)) return; // a follow-up shows inside its card
-      list.push({ kind: "queued", id: "q:" + index, index, anchor: anchorOf(p), body: String(p.prompt || ""), at: "", files: refsOf(p) });
+      list.push({ kind: "queued", id: "q:" + index, index, anchor: anchorOf(p), body: String(p.prompt || ""), at: p.lavishQueuedAt || "", files: refsOf(p) });
     });
     for (const n of notes) list.push({ kind: n.state === "sent" ? "sent" : n.state === "resolved" ? "resolved" : "private", id: n.id, note: n, anchor: n.anchor || null, body: String(n.body || ""), at: n.updated || n.created || "", files: Array.isArray(n.attachments) ? n.attachments : [] });
     return list;
@@ -227,7 +227,7 @@
     const replies = (c.note ? followThread(c.note, queued) : []).map((t) => '<div class="lavish-card-reply' + (t.by === "you" ? " is-you" : "") + '"><small>' + (t.by === "you" ? "You" + (t.queued ? " \u00b7 queued, not sent" : "") : "Agent") + (t.at ? " \u00b7 " + esc(fmtTime(t.at)) : "") + "</small>" + esc(t.text) +
       (t.queued ? ' <button type="button" class="lavish-card-reply-x" data-act="remove" data-id="q:' + t.qi + '">Remove</button>' : "") + "</div>").join("") +
       (c.kind === "sent" && editingId === "f:" + c.id ? '<textarea class="lavish-card-edit lavish-card-followup" data-id="' + esc("f:" + c.id) + '" rows="2" placeholder="Continue the conversation\u2026">' + esc(editDrafts.get("f:" + c.id) || "") + "</textarea>" : "");
-    const meta = c.kind === "sent" && c.note?.sentAt ? "sent " + fmtTime(c.note.sentAt) : c.at ? fmtTime(c.at) : "";
+    const meta = c.kind === "sent" && c.note?.sentAt ? "sent " + fmtTime(c.note.sentAt) : c.kind === "queued" && c.at ? "queued " + fmtTime(c.at) : c.at ? fmtTime(c.at) : "";
     return '<div class="lavish-card is-' + c.kind + (detached ? " is-detached" : "") + (editing ? " is-editing" : "") + (selectedId === c.id ? " is-active" : "") + '" data-id="' + esc(c.id) + '" tabindex="0">' +
       '<div class="lavish-card-top">' + (n ? '<span class="lavish-card-n">' + n + "</span>" : "") + '<span class="lavish-chip">' + (detached ? "Detached" : chip) + '</span><span class="lavish-card-anchor" title="' + esc(c.anchor?.selector || "") + '">' + (isSuggestion ? "edit" : where) + "</span></div>" +
       body + filesHtml(c, editing) + replies + '<div class="lavish-card-actions">' + actions + (meta ? '<span class="lavish-card-meta">' + esc(meta) + "</span>" : "") + "</div></div>";
@@ -520,7 +520,7 @@
   function followThread(n, queuedList) {
     const out = [...(n.follows || []).map((f) => ({ by: "you", at: f.at, text: f.text })), ...(n.replies || []).map((r) => ({ by: "agent", at: r.at, text: r.text }))]
       .sort((a, b) => String(a.at || "").localeCompare(String(b.at || "")));
-    (queuedList || []).forEach((p, qi) => { if (p && p.lavishFollowOf === n.id) out.push({ by: "you", at: "", text: String(p.lavishFollowText ?? p.prompt ?? ""), queued: true, qi }); });
+    (queuedList || []).forEach((p, qi) => { if (p && p.lavishFollowOf === n.id) out.push({ by: "you", at: p.lavishQueuedAt || "", text: String(p.lavishFollowText ?? p.prompt ?? ""), queued: true, qi }); });
     return out;
   }
   /** A delivered follow-up joins its card's conversation instead of becoming a card of its own; false when that card is gone. */
@@ -534,7 +534,7 @@
   /** What a page's own review cards show (render.py's view, page.js): queued and sent comments on its elements, each with its conversation. */
   function railNotes(cardList, queuedList) {
     return cardList.filter((c) => (c.kind === "queued" || c.kind === "sent") && c.anchor?.selector && c.anchor?.tag !== "choice" && !/^(verdict|pick):/.test(c.key || ""))
-      .map((c) => ({ selector: c.anchor.selector, state: c.kind, text: c.body, at: c.kind === "sent" ? c.note?.sentAt || "" : "", thread: c.note ? followThread(c.note, queuedList).map(({ qi, ...t }) => t) : [] }));
+      .map((c) => ({ selector: c.anchor.selector, state: c.kind, text: c.body, at: c.kind === "sent" ? c.note?.sentAt || "" : c.at || "", thread: c.note ? followThread(c.note, queuedList).map(({ qi, ...t }) => t) : [] }));
   }
   /* ── end follow-ups ── */
   function queueFollowUp(noteId) {
@@ -898,6 +898,10 @@
     const origSetReviewState = setReviewState;
     setReviewState = function lavishLocalReviewStateHook() { const r = origSetReviewState.apply(this, arguments); if (!restoring) writeMirror(); return r; };
   }
+  const origEnqueueAt = enqueuePrompt;
+  enqueuePrompt = function lavishLocalQueuedAtHook(raw) { // a queued comment shows when it was queued (Marcus, 2026-10-16)
+    return origEnqueueAt.call(this, raw && typeof raw === "object" && !raw.lavishQueuedAt ? { ...raw, lavishQueuedAt: now() } : raw);
+  };
   const origSubmit = submitQueuedOnce;
   submitQueuedOnce = async function lavishLocalSubmitHook() {
     busy++; renderRail();
@@ -927,6 +931,7 @@
   };
   // The server re-sends the whole chat when the browser reconnects. Sent comments live in our record too,
   // so if the server copy lacks one (an unpatched server, a restore, a lost write) it is merged back in.
+  let chatAts = null;
   const origSyncChat = syncChat;
   syncChat = function lavishLocalSyncHook(chat) {
     const list = Array.isArray(chat) ? chat.slice() : [];
@@ -936,11 +941,15 @@
       if (!list.some((c) => c.role === "user" && (c.text === summary || (n.body && String(c.text || "").endsWith(n.body))))) list.push({ role: "user", kind: "annotation", text: summary, at: n.sentAt });
     }
     list.sort((a, b) => String(a.at || "").localeCompare(String(b.at || "")));
-    return origSyncChat.call(this, list);
+    chatAts = list.map((c) => c.at || ""); // addChat is called once per item, in this order
+    try { return origSyncChat.call(this, list); } finally { chatAts = null; }
   };
   const origAddChat = addChat;
   addChat = function lavishLocalAddChatHook(role, text, shouldScroll, kind) {
     const el = origAddChat.apply(this, arguments);
+    const at = chatAts ? chatAts.shift() : now();
+    const small = el?.querySelector?.("small");
+    if (small && at && fmtTime(at)) small.textContent += " \u00b7 " + fmtTime(at);
     if (role === "agent") { threadReply(String(text || "")); scheduleVersionRefresh(2500); scheduleRegistryRefresh(2500); }
     return el;
   };

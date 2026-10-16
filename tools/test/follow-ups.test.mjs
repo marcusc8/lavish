@@ -66,3 +66,13 @@ test('the wiring: Follow up opens the box in the same card, an empty box queues 
   assert.match(src, /if \(String\(id\)\.startsWith\("f:"\)\) \{ queueFollowUp\(String\(id\)\.slice\(2\)\); return; \}/);
   assert.match(src, /requestAnchors\(\);\n    postNotesToFrame\(\);/);
 });
+
+test('times and line breaks (Marcus, 2026-10-16): a queued comment carries when it was queued, a card and every Conversation bubble show the time, a message keeps its lines', () => {
+  assert.match(src, /enqueuePrompt = function lavishLocalQueuedAtHook\(raw\) \{[^}]*lavishQueuedAt: now\(\)/);
+  assert.match(src, /body: String\(p\.prompt \|\| ""\), at: p\.lavishQueuedAt \|\| "", files: refsOf\(p\)/);
+  assert.match(src, /c\.kind === "queued" && c\.at \? "queued " \+ fmtTime\(c\.at\)/);
+  assert.match(src, /const at = chatAts \? chatAts\.shift\(\) : now\(\);/);
+  assert.match(src, /chatAts = list\.map\(\(c\) => c\.at \|\| ""\);/);
+  const css = readFileSync(new URL('../rail.css', import.meta.url), 'utf8');
+  assert.match(css, /\.bubble > div \{ white-space: pre-wrap;/);
+});

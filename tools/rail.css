@@ -189,3 +189,5 @@ body.lavish-resizing iframe { pointer-events: none; }
 .lavish-card-reply.is-you { margin-left: 22px; background: #eef3ff; color: var(--fg, #262626); }
 .lavish-card-reply-x { margin-left: 6px; padding: 0 6px; font-size: 11px; }
 .lavish-card-followup { margin-top: 6px; }
+/* line breaks (2026-10-16): a message keeps the lines it was written with */
+.bubble > div { white-space: pre-wrap; overflow-wrap: anywhere; }
