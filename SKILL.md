@@ -270,6 +270,11 @@ Stock component-kit themes read as generic AI output. Artifacts should feel deli
 
 ## Plan-artifact template (local requirements, set 2026-07-22, skeleton approved 2026-09-02)
 
+**Decisions in two places (Marcus, 2026-10-16).** Every decision is asked where the plan discusses it as well as under
+Decisions: in that section put `<div class="dmirror" data-decision="<the form's data-lavish-question>"></div>`. The template
+shows the same question there; answering either copy updates both, either Queue sends the one answer, and the export lists
+it once. Plan generators that replace the template's `<main>` must keep the template's script, which does this.
+
 **Review tabs (2026-10-14).** The template carries a `review-view` block before the Feedback log; when you copy the
 template to `<name>.html`, change `plan-template` in that block's script path to `<name>` (the two marker lines and the
 two lines between them otherwise stay exactly as they are). After the plan's first build, `review-changes page` writes

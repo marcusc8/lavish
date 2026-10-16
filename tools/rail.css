@@ -191,3 +191,8 @@ body.lavish-resizing iframe { pointer-events: none; }
 .lavish-card-followup { margin-top: 6px; }
 /* line breaks (2026-10-16): a message keeps the lines it was written with */
 .bubble > div { white-space: pre-wrap; overflow-wrap: anywhere; }
+/* markdown (2026-10-16): an agent's message shows its lists, indents, bold and code */
+.lavish-md p { margin: 0 0 6px; } .lavish-md p:last-child { margin-bottom: 0; }
+.lavish-md ol, .lavish-md ul { margin: 2px 0 6px; padding-left: 22px; white-space: normal; }
+.lavish-md li { margin: 2px 0; }
+.lavish-md code { font: 12px/1.4 ui-monospace, Menlo, monospace; background: rgba(127, 127, 127, 0.15); padding: 0 4px; border-radius: 4px; }

@@ -224,7 +224,7 @@
     if (editing) body = '<textarea class="lavish-card-edit" data-id="' + esc(c.id) + '" rows="4" placeholder="Write the comment\u2026 (paste an image to attach it)">' + esc(editDrafts.has(c.id) ? editDrafts.get(c.id) : c.body) + "</textarea>";
     else if (isSuggestion) body = '<div class="lavish-card-body lavish-card-suggestion"><del>' + esc(trunc(c.anchor.text, 160)) + "</del><ins>" + esc(c.body) + "</ins></div>";
     else body = '<div class="lavish-card-body">' + (c.body ? esc(c.body) : c.files.length ? "" : "<i>(empty)</i>") + "</div>";
-    const replies = (c.note ? followThread(c.note, queued) : []).map((t) => '<div class="lavish-card-reply' + (t.by === "you" ? " is-you" : "") + '"><small>' + (t.by === "you" ? "You" + (t.queued ? " \u00b7 queued, not sent" : "") : "Agent") + (t.at ? " \u00b7 " + esc(fmtTime(t.at)) : "") + "</small>" + esc(t.text) +
+    const replies = (c.note ? followThread(c.note, queued) : []).map((t) => '<div class="lavish-card-reply' + (t.by === "you" ? " is-you" : "") + '"><small>' + (t.by === "you" ? "You" + (t.queued ? " \u00b7 queued, not sent" : "") : "Agent") + (t.at ? " \u00b7 " + esc(fmtTime(t.at)) : "") + "</small>" + (t.by === "agent" ? '<div class="lavish-md">' + mdLite(t.text) + "</div>" : esc(t.text)) +
       (t.queued ? ' <button type="button" class="lavish-card-reply-x" data-act="remove" data-id="q:' + t.qi + '">Remove</button>' : "") + "</div>").join("") +
       (c.kind === "sent" && editingId === "f:" + c.id ? '<textarea class="lavish-card-edit lavish-card-followup" data-id="' + esc("f:" + c.id) + '" rows="2" placeholder="Continue the conversation\u2026">' + esc(editDrafts.get("f:" + c.id) || "") + "</textarea>" : "");
     const meta = c.kind === "sent" && c.note?.sentAt ? "sent " + fmtTime(c.note.sentAt) : c.kind === "queued" && c.at ? "queued " + fmtTime(c.at) : c.at ? fmtTime(c.at) : "";
@@ -515,6 +515,34 @@
     })();
     return n;
   }
+  /* ── markdown (Marcus, 2026-10-16): an agent's message keeps its shape: numbered and bulleted lines, indents, bold, code ── */
+  /** Light Markdown → HTML. Every character is escaped first; only the tags made here are added. */
+  function mdLite(text) {
+    const e = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const inline = (s) => e(s).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+    const out = []; let list = null, para = [];
+    const flush = () => { if (para.length) { out.push("<p>" + para.map(inline).join("<br>") + "</p>"); para = []; } };
+    const close = () => { if (list) { out.push("</" + list + ">"); list = null; } };
+    for (const raw of String(text || "").replace(/\r\n?/g, "\n").split("\n")) {
+      const line = raw.replace(/\t/g, "  ").replace(/\s+$/, "");
+      const m = /^(\s*)(?:(\d+)[.)]|[-*\u2022])\s+(.*)$/.exec(line);
+      if (m) {
+        flush();
+        const kind = m[2] ? "ol" : "ul", depth = Math.min(4, Math.floor(m[1].length / 2));
+        if (list !== kind) { close(); out.push("<" + kind + ">"); list = kind; }
+        out.push("<li" + (depth ? ' style="margin-left:' + depth * 1.2 + 'em"' : "") + (m[2] ? ' value="' + Number(m[2]) + '"' : "") + ">" + inline(m[3]) + "</li>");
+        continue;
+      }
+      close();
+      if (!line.trim()) { flush(); continue; }
+      const h = /^#{1,6}\s+(.*)$/.exec(line.trim());
+      if (h) { flush(); out.push("<p><b>" + inline(h[1]) + "</b></p>"); continue; }
+      para.push(line); // a plain line keeps its indent: the bubble keeps white space
+    }
+    flush(); close();
+    return out.join("");
+  }
+  /* ── end markdown ── */
   /* ── follow-ups (Marcus, 2026-10-15): Follow up continues the same card's conversation ── */
   /** The card's conversation after its first comment, oldest first: your follow-ups and the agent's replies, then your queued follow-ups. */
   function followThread(n, queuedList) {
@@ -949,6 +977,8 @@
     const el = origAddChat.apply(this, arguments);
     const at = chatAts ? chatAts.shift() : now();
     const small = el?.querySelector?.("small");
+    const body = el?.querySelector?.(":scope > div");
+    if (role === "agent" && body) { body.innerHTML = mdLite(text); body.classList.add("lavish-md"); }
     if (small && at && fmtTime(at)) small.textContent += " \u00b7 " + fmtTime(at);
     if (role === "agent") { threadReply(String(text || "")); scheduleVersionRefresh(2500); scheduleRegistryRefresh(2500); }
     return el;
