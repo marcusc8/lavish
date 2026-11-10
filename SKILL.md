@@ -268,7 +268,7 @@ Stock component-kit themes read as generic AI output. Artifacts should feel deli
 - Tables stay quiet: tabular figures for numbers, one delimiter style (hairline OR faint zebra, not both), badges only where a status genuinely needs one.
 - Avoid the generic-AI tells: uniform grids of identical rounded cards, badge/emoji confetti, alert components wrapping non-alerts, gradient hero banners, and every section boxed in its own card.
 
-## Plan-artifact template (local requirements, set 2026-07-22, skeleton approved 2026-09-02)
+## Plan-artifact template (local requirements, set 2026-07-22, skeleton approved 2026-09-02, layout and page register 2026-11-10)
 
 **Decisions in two places (Marcus, 2026-10-16).** Every decision is asked where the plan discusses it as well as under
 Decisions: in that section put `<div class="dmirror" data-decision="<the form's data-lavish-question>"></div>`. The template
@@ -284,19 +284,76 @@ chat working on every tab because it is one Lavish page. A plan with no review y
 **Start every plan from `~/.claude/skills/lavish/tools/plan-template.html`** (copy it, keep it a single
 self-contained .html: vanilla JS, no build step, the Mermaid CDN as the only external dependency, opens
 directly with no server). Reference implementation of the skeleton: StyleManager
-`.lavish/2026-09-02-lavish-planning-upgrades.html`. The skeleton, which the user approved on 2026-09-02:
+`.lavish/2026-09-02-lavish-planning-upgrades.html`; of the 2026-11-10 layout and register: StyleManager
+`docs/plans/2026-11-10-plan-layout-example.html` (an example built by hand, before the register was data).
+The skeleton, which the user approved on 2026-09-02 and revised on 2026-11-10:
 
 - **Front-matter**: `<title>` (the naming rule, D8 of the home redesign: what the plan decides, entity
   first, 3 to 7 words, no dates or codes — the home page and the Lavish tab show it verbatim; a plan can be
   renamed later on its home plan page), `<meta name="description">` (one sentence, the home page shows it),
   `lavish:project`, and `lavish:related` when it builds on another plan.
-- **Reading order is fixed**: 1 Read this first (the answer in one paragraph inside `.answer`, then
-  "What changed in this version"; older rounds under a collapsed "Earlier rounds") · 2 Decisions (every
-  decision card, recommended option pre-checked, decided ones keep their answer via `data-decided`; the
-  standard `table.alts` for alternatives: Option · What it buys · What it costs, `tr.rec` marks the
-  recommendation) · then the evidence: Current state (verified against code, file paths) · Design ·
-  Execution · Plan by PR · Risks and what to review (ordered by how silently it fails; what could not be
-  verified is named) · Open questions · Feedback log.
+- **Two bands, in this order** (Marcus, 2026-11-10: he reads the designs, the decisions and what is open; he
+  reviews designs in Figma and trusts the build plan). **For the reader**, open: Read this first · The pages
+  (only when the plan draws screens) · Decisions (every decision card, recommended option pre-checked, decided
+  ones keep their answer via `data-decided`; the standard `table.alts` for alternatives: Option · What it buys ·
+  What it costs, `tr.rec` marks the recommendation) · Open questions · Risks and what to review (ordered by how
+  silently it fails; what could not be verified is named). Then the line `div.band#builder` "For the builder",
+  and **for the builder**, closed by default: Current state (verified against code, file paths) · Design ·
+  Execution · Plan by PR · Feedback log. Never delete the builder sections: other sessions and the planning
+  flow read them. A choice that is hard to undo (the shape of the data, money, a migration) is never left
+  below the line: it goes to the reader as a decision in plain words. Section titles carry no numbers.
+- **Header**: the `h1` is the plan's NAME in three to eight words (`<br>` after a colon is fine), never a
+  sentence. The sentence goes in `p.lede` (one or two). The facts go in `.meta > dl.kv`, label beside value:
+  For · Date and version · From (the request, brief or pins answered) · Scope · Builds on.
+- **The answer** (`.answer`): ONE sentence in `p.answer-lead`, then three to eight points in `dl.kv.points`
+  (a two-to-four-word label, a one-line value), then the counts in `p.answer-count`. No paragraph of 200
+  words. The reader's own words go under "In your words" in `.said` (`span.when` + `q`), quoted as written.
+  `.example` takes a title in `p.ex-title` and the case followed through its places in a `dl.kv`.
+- **Label beside value everywhere** (his pin of 7 November 2026): facts, key points, a page's details and a
+  worked example are `dl.kv` rows (`<div><dt>label</dt> <dd>value</dd></div>`), never a value under its label.
+- **Width**: the page takes the whole window; prose stops at 70 characters, tables and decisions at 1,120 px,
+  pictures run to the right edge. Do not set a `max-width` on `.page` or `main`.
+- **The pages: a register, not a gallery** (section `data-sec="The pages"`, his notes of 2026-11-10). One
+  entry per PAGE, listing every drawing of it oldest first, as JSON in `<script type="application/json"
+  id="plan-pages">`; the template draws the cards, the filters, the outline rows and the preview into
+  `#planPages`. A page a round does not touch STAYS in the list: that is how he finds the latest version of
+  every page, and it is the reason the register exists. Carry the JSON forward from the previous plan of the
+  same work and add this round's drawings to their pages; never start a new list of only this round's frames.
+  The fields: `round` (the current round) · `figma` (the file's URL up to `node-id=`) · `assets` (the pictures'
+  folder, relative to the plan) · `groups[]` (`id`, `letter` = the Figma section's letter or "", `name`,
+  `short` for the outline) · `pages[]` (`group`, `title`, `does`, `fig`, `decisions`, `final`, `retired`,
+  `drawings[]`) · `drawings[]` (`round`, `at`, `file`, `node`, `w`, `h`, and `problem` / `solution` /
+  `changed`, or one line in `note`). The rules:
+  - **State is derived, except two.** New = one drawing, of this round. Revised = several, the last of this
+    round. Unchanged = the last is of an earlier round. `retired` (a sentence: why, and what replaced it) only
+    when he retired the page; `final` (the day he said so, "9 November") only on his word, and a later pin removes it.
+  - **A page is what he would call one page.** When a round redraws a page under a new file name, add the
+    drawing to the SAME page. Two variations of one round are two pages until he picks one.
+  - **Every drawing has its day and hour** in `at` (local time, `YYYY-MM-DDTHH:MM`, when the picture was
+    saved): he edits many things in one day and tells rounds apart by the hour.
+  - **Every page says what it does** in `does`: one plain sentence a reader who does not code can follow.
+    **Every drawing of this round says** `problem` (what was wrong or missing, in his words where a pin said
+    it), `solution` (what the drawing does about it) and `changed` (what differs from the earlier drawing, or
+    "New page."). Do not invent a problem the sources do not state; say what the drawing set in `note` instead.
+  - **Pictures are whole pages**, top to bottom, never cropped, with `w` and `h` so a lazy picture keeps its
+    place. A click opens the page over the whole window with its details, its comment count and its decision
+    cards beside it; a comment made there stays attached to that page (the template moves the picture and the
+    details into the preview and back, and both carry ids).
+  - **`fig`** numbers this round's pages in reading order; "figure 3" and "figures 3–5, 8" anywhere in the
+    text then link to the card by themselves.
+- **Decisions point at what they are about**: the number in `span.dn`, the question and `p.why` in `.dq`, the
+  options in `.dopts` (lead words in `<b>` inside `span.opt`). `data-place="<a heading or section name>"` on
+  the form names where the plan discusses it; a page lists its decisions in `"decisions": ["D1"]`. The
+  template then writes "Refers to: Figure 1 · the plan: <place>" under the question, shows a "To decide" row
+  on the page's card, and puts the same card (a `.dmirror`, so one answer) in that page's preview. "D5"
+  anywhere in the text links to its card. A card written the short way (`h4` "D1 · …", `p.why`, labels) is
+  wrapped by the template.
+- **Links that jump**: write a reference to a place in the plan as `<a href="#id">` and give the target an
+  `id`; the template opens the target's section, scrolls to it and outlines it. With Annotate on, Lavish turns
+  a click on anything but a button or a form control into a comment, links included, so anything of your own
+  that must stay clickable carries `data-lavish-action` (the template sets it on the outline, on `href="#…"`
+  links and on its own controls). A modal `<dialog>` sits above Lavish's comment card: never use one for
+  something the reader should be able to comment on.
 - **Execution section** (`details[data-sec="Execution"]`, between Design and Plan by PR): which agents are
   started, in what order and in which lanes, with ONE diagram (one box per agent, an arrow for "waits for"),
   a table of the same (order, lane, agent, what it does, when it starts), and a paragraph headed "What you
@@ -312,10 +369,12 @@ directly with no server). Reference implementation of the skeleton: StyleManager
   names and other identifiers belong in the evidence sections (Current state, Design, Execution, Plan by
   PR), never in the answer paragraph or in a decision's question and options: the reader decides from the
   answer and the decisions alone, and a sentence they cannot read is a decision they cannot make.
-- **Sticky outline** (`nav.outline`, built by the template JS from `details[data-sec]`): one entry per
-  section with its review-status dot, the tally at the bottom, click to jump, active section follows
-  the reading position; a Hide button and, below 1000 px (the Lavish iframe with both rails open), a
-  floating "Outline" button that opens it as a drawer.
+- **Outline rail** (`nav.outline`, built by the template JS from `details[data-sec]`): a rail on the LEFT
+  EDGE of the window, as tall as the window, with one entry per section, its review-status dot, the tally at
+  the bottom, click to jump, active section follows the reading position. Under The pages it lists one row
+  per group of the register (the Figma section's letter, its short name, pages drawn this round in blue and
+  pages in grey); the builder's sections sit under a "For the builder" label. A Hide button and, below
+  1000 px (the Lavish iframe with both rails open), a floating "Outline" button that opens it as a drawer.
 - **Every section is `details[data-sec]` with a `summary.h`** carrying `.title`, a one-line `.sum` shown
   only while collapsed, and `.badges` (reading time; `span.risk` for prod-silent areas: RLS, money,
   migrations, Edge deploys). A plan must be skimmable with every section closed.
@@ -330,7 +389,8 @@ directly with no server). Reference implementation of the skeleton: StyleManager
   never a bullet list; old vs new is shown as a visual diff (`.diffold` / `.diffnew`).
 - **Export** stays visible-first and exports the WHOLE plan: a `<dialog>` with the Markdown in a
   textarea and Copy / Download / "Send to agent" (queuePrompt `tag: "export"`; the agent saves it as
-  .md and confirms the path). Mermaid sources are stashed before `mermaid.run()` and emitted as fences;
+  .md and confirms the path). The register exports one block per page (its latest drawing, state and
+  details); `dl.kv` rows export as "label: value" lines. Mermaid sources are stashed before `mermaid.run()` and emitted as fences;
   viewer-only controls are skipped. Never rely on a programmatic download alone (embedded frames block it silently).
 - **Feedback log**: the last section; after EVERY poll round that returns feedback the agent appends one
   line per received item with a one-line response, so the exported document carries its review history.

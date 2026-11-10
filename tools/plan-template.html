@@ -9,7 +9,7 @@
 <!-- <meta name="lavish:related" content="docs/plans/YYYY-MM-DD-previous-plan.html"> -->
 <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
 <style>
-  /* ── Plan template (Lavish skill, 2026-09-02). Editorial paper look, one accent, sticky outline. ──
+  /* ── Plan template (Lavish skill, 2026-09-02). Editorial paper look, one accent, outline rail. The layout block at the end of this stylesheet (2026-11-10) overrides the rules here. ──
      Copy this file as the starting point of every plan. Keep it self-contained: no build step, no
      external dependency but the Mermaid CDN, opens directly without a server. */
   :root { --paper: #faf9f6; --ink: #1c1b1a; --ink-2: #4a4845; --ink-3: #7a7772; --hairline: #e6e3dd; --accent: #1f4e79; --accent-soft: #e4ecf4; --ok: #2f7d4f; --ok-soft: #e3f0e6; --warn: #8a6d1f; --warn-soft: #f6efdc; --crit: #9b3b2e; --crit-soft: #f5e4e0; --outline-w: 200px; }
@@ -136,6 +136,214 @@
   dialog textarea { width: 100%; height: 55vh; font: 12.5px/1.45 Menlo, monospace; }
   .dlgrow { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
   .src { font-size: 13px; color: var(--ink-3); }
+
+  /* ── Layout (2026-11-10). Every rule from here to the end overrides one above; keep this block last.
+     Five ideas: a headline that is a name, prose on a readable measure, one tint instead of four,
+     labels beside their values, and three clearly different heading sizes. ── */
+  :root { --measure: 70ch; --wash: #f2f0ea; --rule: #4a4845; --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; }
+  body { line-height: 1.6; }
+  main img { max-width: 100%; height: auto; }
+
+  /* shell: the page takes the whole width. The outline is a rail on the left edge; prose keeps its measure,
+     tables and decisions stop at --wide, pictures run to the right edge. */
+  :root { --outline-w: 256px; --wide: 1120px; --bar-h: 45px; }
+  .page { max-width: none; margin: 0; padding: 0 36px 120px 0; gap: 44px; }
+  main { max-width: none; padding-top: 34px; }
+  body.outline-hidden .page { padding-left: 36px; }
+  .answer, .said, .example, .dgrid, .band, main table { max-width: var(--wide); }
+  .outline { top: var(--bar-h); box-sizing: border-box; height: calc(100vh - var(--bar-h)); max-height: none; padding: 16px 12px 28px 16px; background: #f5f3ee; border-right: 1px solid var(--hairline); font-size: 13.5px; }
+  .outline-head { margin: 0 2px 10px; }
+  .outline li { padding: 6px 8px; color: var(--ink); font-weight: 500; }
+  .outline li:hover, .outline .subs a:hover { background: #ebe8e1; }
+  .outline li .n { display: none; }
+  .outline .subs { display: grid; margin: 2px 0 10px 16px; padding-left: 6px; border-left: 1px solid #dcd8cf; }
+  .outline .subs a { display: grid; grid-template-columns: 31px minmax(0, 1fr) auto; column-gap: 6px; align-items: baseline; padding: 4px 8px; border-radius: 6px; color: var(--ink-2); text-decoration: none; font-size: 12.5px; line-height: 1.3; }
+  .outline .subs a.is-active { background: var(--accent-soft); color: var(--ink); }
+  .outline .subs .gl { font-weight: 600; font-size: 11px; letter-spacing: .03em; color: var(--ink-3); min-width: 1.1em; }
+  .outline .subs .c { display: grid; grid-template-columns: 1.5em 1.7em; text-align: right; font-size: 11.5px; font-variant-numeric: tabular-nums; color: var(--ink-3); }
+  .outline .subs .c b { color: var(--accent); font-weight: 600; }
+  .outline .subs .leg { padding: 6px 8px 0; font-size: 11px; line-height: 1.35; color: var(--ink-3); }
+  .outline .subs .leg b { color: var(--accent); font-weight: 600; }
+  .outline .olabel { font: 600 10.5px/1.3 "Avenir Next", system-ui, sans-serif; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); margin: 18px 8px 6px; }
+  .outline .olabel ~ li { font-weight: 400; font-size: 12.5px; color: var(--ink-2); padding: 4px 8px; }
+  .outline-tally { margin: 16px 8px 0; }
+  @media (max-width: 1000px) { .page { padding: 0 20px 120px; } .outline.is-open { height: auto; } }
+
+  /* header: the plan's name, one sentence, then the facts as label | value */
+  .kicker { color: var(--ink-3); letter-spacing: .1em; }
+  h1 { font-size: 44px; line-height: 1.08; letter-spacing: -0.022em; margin: 10px 0 16px; max-width: 26ch; text-wrap: balance; }
+  .lede { font-size: 20px; line-height: 1.45; max-width: 58ch; margin: 0 0 26px; text-wrap: pretty; }
+  .meta { color: inherit; font-size: 14.5px; margin: 0 0 14px; max-width: 760px; }
+  .stage { margin: 0 0 12px; } .stage-steps { max-width: 520px; } .stage-steps li { font-size: 12px; padding: 5px 4px; }
+
+  /* label | value: the one pattern used for facts, key points, quotes and worked examples */
+  dl.kv { display: grid; grid-template-columns: 10em minmax(0, 1fr); column-gap: 20px; margin: 0; border-bottom: 1px solid var(--hairline); }
+  dl.kv > div { display: contents; }
+  dl.kv dt, dl.kv dd { margin: 0; padding: 8px 0; border-top: 1px solid var(--hairline); }
+  dl.kv dt { color: var(--ink-3); }
+  dl.kv.points { grid-template-columns: 13.5em minmax(0, 1fr); font-size: 15.5px; }
+  dl.kv.points dt { color: var(--ink); font-weight: 600; }
+  dl.kv.points dd { color: var(--ink-2); }
+  @media (max-width: 640px) { dl.kv, dl.kv.points { grid-template-columns: minmax(0, 1fr); } dl.kv dd { border-top: 0; padding-top: 0; } }
+
+  /* sections: titles flush with the text, no empty caret column, more air between sections */
+  section.blk { padding: 22px 0 30px; margin-top: 14px; }
+  details > summary.h { padding: 12px 0 10px; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title badges" "sum badges"; column-gap: 14px; }
+  details > summary.h::before { display: none; }   /* the viewer script already hides it; this removes the empty column it left */
+  summary.h .title { font-size: 30px; line-height: 1.15; letter-spacing: -0.015em; }
+  summary.h .sum { font-size: 14.5px; margin-top: 4px; }
+  summary.h .badges span:not(.risk) { background: none; padding: 0; font-size: 12.5px; }
+  h3 { font-size: 20px; line-height: 1.25; margin: 40px 0 10px; }
+  details > p, details > ul.styled, details > ol.styled, details > h3 { max-width: var(--measure); }
+  p.figcap, figcaption.figcap { max-width: 78ch; line-height: 1.5; }
+  ul.styled li, ol.styled li { margin: 8px 0; }
+  ul.styled li::before { background: var(--ink-3); width: 5px; height: 5px; }
+
+  /* the answer: no box. One sentence in display type, the points as label | value, the counts on one line */
+  .answer { border: 0; background: none; padding: 0; margin: 10px 0 34px; font-size: 16px; line-height: 1.55; }
+  .answer-lead { font-family: var(--serif); font-size: 27px; line-height: 1.22; letter-spacing: -0.012em; max-width: 30ch; margin: 0 0 20px; text-wrap: balance; }
+  .answer-count { font-size: 14.5px; color: var(--ink-2); margin: 14px 0 0; font-variant-numeric: tabular-nums; }
+  .answer-count b { color: var(--ink); font-size: 16px; }
+
+  /* his words: date | quote on hairlines, no amber */
+  .said { margin: 0 0 30px; border-bottom: 1px solid var(--hairline); }
+  .said p { display: grid; grid-template-columns: 10em minmax(0, 1fr); column-gap: 20px; margin: 0; padding: 10px 0; border-top: 1px solid var(--hairline); }
+  .said .when { color: var(--ink-3); font-size: 14.5px; }
+  .said q { font-family: var(--serif); font-style: italic; font-size: 16.5px; line-height: 1.5; color: var(--ink-2); quotes: "\201C" "\201D"; max-width: 62ch; }
+  @media (max-width: 640px) { .said p { grid-template-columns: minmax(0, 1fr); } }
+
+  /* the example: the page's one neutral wash */
+  .example { border: 0; background: var(--wash); border-radius: 8px; padding: 16px 20px 18px; margin: 22px 0 30px; }
+  .example::before { color: var(--ink-3); margin-bottom: 6px; }
+  .example .ex-title { font-weight: 600; margin: 0 0 10px; }
+  .example dl.kv { font-size: 15px; border-bottom: 0; }
+  .example dl.kv dt, .example dl.kv dd { border-top-color: #e0dcd3; }
+  .example dl.kv dt { color: var(--ink); font-weight: 500; }
+  .callout { border: 0; }
+  .dmirror .dform { border: 0; background: var(--wash); border-radius: 8px; padding: 18px 20px; }
+
+  /* tables: a firm rule under the header, hairlines between rows, no zebra */
+  table { margin: 12px 0 22px; line-height: 1.45; }
+  th { font-size: 11.5px; letter-spacing: .06em; padding: 8px 14px 8px 0; border-bottom: 1px solid var(--rule); }
+  td { padding: 10px 14px 10px 0; border-bottom: 1px solid var(--hairline); }
+  tbody tr:nth-child(even) td { background: none; }
+  tbody td:first-child { color: var(--ink); font-weight: 500; }
+  tr.grp td { background: var(--wash); padding-left: 10px; font-size: 12.5px; letter-spacing: .04em; font-weight: 400; color: var(--ink-2); }
+  tr.grp td b { color: var(--ink); }
+  .chip { display: inline-block; font: 600 10.5px/1 "Avenir Next", system-ui, sans-serif; letter-spacing: .05em; padding: 3px 7px; border-radius: 4px; border: 1px solid #d6d1c7; color: var(--ink-2); background: #fff; white-space: nowrap; }
+  .chip.label { border-color: #b9cbdd; color: var(--accent); }
+  .chip.print { border-color: var(--accent-soft); background: var(--accent-soft); color: var(--accent); }
+
+  /* pictures */
+  figure { margin: 30px 0 34px; }
+  figure img { display: block; border: 1px solid var(--hairline); border-radius: 6px; background: #fff; }
+  figure figcaption.figcap { margin: 10px 0 0; }
+
+  /* decisions: one per row. The question on the left, its options on the right as rows you can click */
+  .dgrid { display: block; margin: 4px 0 8px; }
+  .dform { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); column-gap: 40px; border: 0; border-top: 1px solid var(--hairline); border-radius: 0; background: none; padding: 28px 0 26px; }
+  .dgrid > .dform:first-child { border-top: 0; padding-top: 10px; }
+  .dform .dn { display: block; font: 600 12px/1 "Avenir Next", system-ui, sans-serif; letter-spacing: .08em; color: var(--accent); margin-bottom: 9px; }
+  .dform h4 { font-family: var(--serif); font-size: 20px; line-height: 1.25; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 10px; text-wrap: balance; }
+  .dform .why { font-size: 14.5px; line-height: 1.5; margin: 0; }
+  .dform label { display: flex; gap: 10px; align-items: baseline; padding: 10px 12px; margin: 0 0 6px; border: 1px solid var(--hairline); border-radius: 8px; background: #fff; font-size: 14.5px; line-height: 1.45; cursor: pointer; }
+  .dform label:hover { border-color: #cfdae6; }
+  .dform label:has(input:checked) { border-color: var(--accent); background: #f4f8fc; }
+  .dform label input { margin: 0; flex: none; position: relative; top: 1px; accent-color: var(--accent); }
+  .dform .opt { flex: 1 1 auto; color: var(--ink-2); }
+  .dform .opt b { color: var(--ink); font-weight: 600; }
+  .dform .rec { flex: none; border: 0; padding: 0; margin: 0; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; font-weight: 600; }
+  .dform .row { margin-top: 10px; }
+  .dform textarea { height: 38px; min-height: 38px; background: #fff; }
+  .dform .row button { background: #fff; color: var(--accent); }
+  @media (max-width: 1100px) { .dform { grid-template-columns: minmax(0, 1fr); row-gap: 16px; } }
+
+  /* the designs: a contact sheet that points at Figma, where the frames are read and pinned */
+  .sheet { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(var(--thumb, 360px), 100%), 1fr)); gap: 32px 26px; align-items: start; margin: 14px 0 8px; }
+  .sheet figure { margin: 0; }
+  .sheet .shot { display: block; border: 1px solid var(--hairline); border-radius: 6px; overflow: hidden; background: #fff; }
+  .sheet .shot:hover { border-color: var(--accent); }
+  .sheet .shot img { display: block; width: 100%; border: 0; border-radius: 0; }
+  .sheet figcaption.figcap { margin: 10px 0 0; font-size: 13px; }
+  .sheet figcaption b { display: block; color: var(--ink); font-size: 14px; font-weight: 600; margin-bottom: 2px; }
+  .sheet figcaption a { white-space: nowrap; }
+
+  /* the page register: one card per page, its latest drawing, its state. Every size shows the whole picture,
+     top to bottom; L is one per row at the picture's own width. A click opens the page over the whole window. */
+  .pagebar { position: sticky; top: var(--bar-h); z-index: 5; display: flex; flex-wrap: wrap; gap: 8px 22px; align-items: center; justify-content: space-between; margin: 20px 0 4px; padding: 10px 0; background: var(--paper); border-bottom: 1px solid var(--hairline); }
+  .seg { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+  .seg-l { font-size: 12.5px; color: var(--ink-3); margin-right: 4px; }
+  .seg button { font: inherit; font-size: 13px; line-height: 1.2; padding: 5px 11px; border: 1px solid var(--hairline); border-radius: 999px; background: #fff; color: var(--ink-2); cursor: pointer; }
+  .seg button:hover { border-color: #cfdae6; }
+  .seg button[aria-pressed="true"] { background: var(--accent-soft); border-color: #b9cbdd; color: var(--accent); font-weight: 600; }
+  .seg button i { font-style: normal; font-weight: 400; font-variant-numeric: tabular-nums; margin-left: 5px; opacity: .75; }
+  .pgroup { scroll-margin-top: calc(var(--bar-h) + 62px); }
+  .pgroup[hidden], .pcard[hidden] { display: none; }
+  .pgroup > h3 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; max-width: none; margin: 34px 0 14px; }
+  .pgroup > h3 .gl { font: 600 12px/1 "Avenir Next", system-ui, sans-serif; letter-spacing: .08em; color: var(--accent); }
+  .pgroup > h3 .gc { font: 400 13px/1.3 "Avenir Next", system-ui, sans-serif; letter-spacing: 0; color: var(--ink-3); }
+  main[data-z="s"] { --thumb: 230px; }
+  .sheet .shot { width: 100%; padding: 0; font: inherit; cursor: zoom-in; }
+  .sheet .shot img { height: auto; }
+  main[data-z="l"] .sheet { grid-template-columns: minmax(0, 1fr); gap: 48px; }
+  main[data-z="l"] .sheet .shot { width: fit-content; max-width: 100%; }
+  main[data-z="l"] .sheet .shot img { width: auto; max-width: 100%; }
+  .st { display: inline-block; font: 600 11px/1.2 "Avenir Next", system-ui, sans-serif; letter-spacing: .03em; padding: 3px 9px; border-radius: 999px; border: 1px solid transparent; white-space: nowrap; }
+  .st.new { background: var(--accent); color: #fff; }
+  .st.revised { background: var(--accent-soft); color: var(--accent); }
+  .st.unchanged { background: var(--wash); color: var(--ink-2); }
+  .st.final { background: var(--ok-soft); color: #25663f; }
+  .st.retired, .st.older { border-color: #d6d1c7; color: var(--ink-2); background: #fff; }
+  .pcard .st { margin-bottom: 7px; }
+  .pcard figcaption b { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+  /* a page's details: label beside value, on the card and beside the picture in the preview */
+  dl.kv.info { grid-template-columns: 7.2em minmax(0, 1fr); column-gap: 12px; margin: 8px 0 4px; border-bottom: 0; font-size: 13px; line-height: 1.45; }
+  dl.kv.info dt, dl.kv.info dd { padding: 5px 0; }
+  dl.kv.info dd { color: var(--ink); }
+  .pcard .links { display: block; margin-top: 6px; color: var(--ink-3); white-space: normal; }
+  main[data-z="s"] .pcard dl.info { display: none; }
+  main[data-z="l"] .pcard figcaption b { display: block; }
+  main[data-z="l"] .pcard figcaption { max-width: 78ch; }
+  .pcard[data-state="retired"] .shot img, .pcard[data-state="older"] .shot img { opacity: .5; }
+  /* the preview. Not a <dialog>: a modal dialog sits above Lavish's annotation card and makes it unclickable. */
+  body.pv-open > #summarybar, body.pv-open > .page, body.pv-open > .outline-fab { display: none; }
+  .pv { position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; background: #ebe8e1; }
+  .pv[hidden] { display: none; }
+  .pv-bar { flex: none; display: flex; align-items: center; gap: 10px; padding: 9px 18px; background: var(--paper); border-bottom: 1px solid var(--hairline); font-size: 14px; }
+  .pv-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+  .pv-n { font-size: 13px; color: var(--ink-3); font-variant-numeric: tabular-nums; white-space: nowrap; margin-right: 4px; }
+  .pv-bar button, .pv-bar .pv-figma { font: inherit; font-size: 13px; line-height: 1.2; padding: 6px 12px; border: 1px solid var(--hairline); border-radius: 999px; background: #fff; color: var(--ink-2); cursor: pointer; text-decoration: none; white-space: nowrap; }
+  .pv-bar button:hover, .pv-bar .pv-figma:hover { border-color: #b9cbdd; color: var(--accent); }
+  .pv-bar button[data-pv="close"] { background: var(--ink); border-color: var(--ink); color: #fff; }
+  .pv-main { flex: 1 1 auto; min-height: 0; display: flex; }
+  .pv-body { flex: 1 1 auto; min-width: 0; overflow: auto; padding: 22px; }
+  .pv-side { flex: none; width: 400px; box-sizing: border-box; overflow: auto; padding: 20px 22px 28px; background: var(--paper); border-left: 1px solid var(--hairline); }
+  .pv-side figcaption { margin: 0; font-size: 14px; color: var(--ink); }
+  .pv-side figcaption > b { display: block; font-family: var(--serif); font-size: 19px; line-height: 1.25; letter-spacing: -0.01em; margin: 10px 0 6px; }
+  .pv-side dl.kv.info { font-size: 14px; }
+  .pv-side dl.kv.info dt, .pv-side dl.kv.info dd { padding: 8px 0; }
+  .pv-side .links { display: block; margin-top: 12px; }
+  .pv-extra h4 { font: 600 11px/1.3 "Avenir Next", system-ui, sans-serif; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-3); margin: 26px 0 8px; }
+  .pv-extra .dmirror .dform { display: block; margin: 0 0 12px; padding: 16px 16px 14px; }
+  .pv-extra .dform .dopts { margin-top: 12px; }
+  .pv-extra .dform h4 { font-family: var(--serif); font-size: 17px; letter-spacing: -0.01em; text-transform: none; color: var(--ink); margin: 0 0 8px; }
+  .drefs { font-size: 13.5px; color: var(--ink-3); margin: 12px 0 0; }
+  .cc.has { color: var(--accent); font-weight: 600; }
+  @media (max-width: 900px) { .pv-main { flex-direction: column-reverse; } .pv-side { width: auto; max-height: 40vh; border-left: 0; border-bottom: 1px solid var(--hairline); } }
+  .pv-body img { display: block; margin: 0 auto; max-width: 100%; height: auto; border: 1px solid #d6d1c7; border-radius: 6px; background: #fff; }
+  .pv-hint { flex: none; padding: 7px 18px; background: var(--paper); border-top: 1px solid var(--hairline); font-size: 12.5px; color: var(--ink-3); }
+  a.ref { text-decoration-style: dotted; text-underline-offset: 3px; }
+  .is-target { outline: 2px solid var(--accent); outline-offset: 8px; border-radius: 6px; }
+  dl.kv.key { grid-template-columns: 15em minmax(0, 1fr); max-width: var(--wide); font-size: 14.5px; margin: 14px 0 6px; }
+  dl.kv.key dd { color: var(--ink-2); }
+
+  /* the line between the reader's sections and the builder's */
+  .band { display: grid; grid-template-columns: 10em minmax(0, 1fr); column-gap: 20px; align-items: baseline; margin: 64px 0 6px; padding: 14px 18px; background: var(--wash); border-radius: 8px; }
+  .band-t { font: 600 12px/1.4 "Avenir Next", system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); }
+  .band-s { font-size: 14px; color: var(--ink-2); }
+  .band ~ section.blk summary.h .title { font-size: 22px; }
+  .band ~ section.blk { padding: 10px 0 12px; margin-top: 0; }
+  @media (max-width: 640px) { .band { grid-template-columns: minmax(0, 1fr); } }
 </style>
 </head>
 <body>
@@ -154,37 +362,131 @@
   <div class="outline-tally" id="outlineTally"></div>
 </nav>
 <main>
-  <div class="kicker">MODULE · Plan · YYYY-MM-DD</div>
-  <h1>One sentence that states the recommendation, not the topic.</h1>
-  <div class="meta">Who this is for, what was verified against the code, and where the previous version is.</div>
+  <!-- HEADER: the plan's NAME as the headline (not a sentence), one or two sentences under it, then the facts as label | value. -->
+  <div class="kicker">MODULE · Plan</div>
+  <h1>The plan's name: <br>what it settles</h1>
+  <p class="lede">One or two sentences: what this plan decides, and what changes for the person using the product.</p>
+  <div class="meta"><dl class="kv">
+    <div><dt>For</dt> <dd>Who decides</dd></div>
+    <div><dt>Date</dt> <dd>D Month YYYY · version N</dd></div>
+    <div><dt>From</dt> <dd>The request, brief or pins this plan answers</dd></div>
+    <div><dt>Scope</dt> <dd>What was touched and what was verified, in one line</dd></div>
+    <div><dt>Builds on</dt> <dd><a href="YYYY-MM-DD-previous-plan.html">The previous plan</a>, or delete this row</dd></div>
+  </dl></div>
   <div class="stage" id="stage"><ol class="stage-steps"><li data-stage="planning">Planning</li><li data-stage="developing">Developing</li><li data-stage="review">Review</li><li data-stage="done">Done</li></ol><div class="stage-note" id="stageNote">Stage, working session and progress appear here inside Lavish (from the home page's registry).</div></div>
 
-  <!-- 1 · READ THIS FIRST: the answer, what changed since the last version, nothing else -->
+  <!-- ══ FOR THE READER ══ These sections come first and open: the answer, the pages, the decisions, what is still open,
+       what to review. The reader looks at designs in Figma and pins there; this page says what cannot be drawn. -->
+
+  <!-- READ THIS FIRST: one sentence, then the points as label | value, then the counts. No paragraph of 200 words. -->
   <section class="blk"><details open data-sec="Read this first">
-    <summary class="h"><span class="title">1 · Read this first</span><span class="sum">The answer in one paragraph and what changed since the last version.</span><span class="badges"><span>2 min</span></span></summary>
-    <div class="answer">The recommendation in one paragraph: what to do, in what order, and the one thing that would change the answer.</div>
-    <div class="example">Lead an unfamiliar or complicated topic with a concrete case using this project's own entities (a linesheet, a sample cart, a factory PO), then state the rule. Prefer a chart or a table with real numbers to adjectives; put the source link next to the claim; a picture from the web goes in <code>docs/plans/assets/&lt;slug&gt;/</code> with a caption and its source.</div>
+    <summary class="h"><span class="title">Read this first</span><span class="sum">The answer in one sentence, its points, and what changed since the last version.</span><span class="badges"><span>2 min</span></span></summary>
+    <div class="answer">
+      <p class="answer-lead">The recommendation in one sentence: what to do, and the one thing that would change the answer.</p>
+      <dl class="kv points">
+        <div><dt>A point, named</dt> <dd>What it means, in one line.</dd></div>
+        <div><dt>Another point</dt> <dd>Three to eight of these. Each label is two to four words.</dd></div>
+        <div><dt>Where you work</dt> <dd>The page or place the reader will use.</dd></div>
+      </dl>
+      <p class="answer-count"><b>N</b> pages drawn this round · <b>N</b> decisions are yours below · <b>N</b> questions stay open</p>
+    </div>
+    <h3>In your words</h3>
+    <div class="said">
+      <p><span class="when">D Month</span> <q>The request, quoted as it was written.</q></p>
+    </div>
+    <div class="example">
+      <p class="ex-title">One real case, followed through the places it appears. Use this project's own entities (a linesheet, a sample cart, a factory PO).</p>
+      <dl class="kv">
+        <div><dt>The first place</dt> <dd>What the reader sees there.</dd></div>
+        <div><dt>The second place</dt> <dd>What the same thing looks like there.</dd></div>
+      </dl>
+    </div>
     <h3>What changed in this version</h3>
-    <ul class="styled"><li>One line per change, newest version first. Older rounds go under a collapsed "Earlier rounds" details block.</li></ul>
+    <ul class="styled"><li>One line per change, newest version first, each linked to its page ("figure 3" and "D2" link by themselves). Older rounds go under a collapsed "Earlier rounds" details block.</li></ul>
   </details></section>
 
-  <!-- 2 · DECISIONS: everything the reader must decide, recommended option pre-marked -->
+  <!-- THE PAGES: the register. One entry per PAGE (not per round), listing every drawing of it, oldest first. The script
+       draws the cards, the filters, the outline rows and the preview from the JSON below. Keep a page in the list when a
+       round does not touch it: that is how the reader finds the latest version of every page.
+       A plan that draws no screens deletes this whole section.
+       · round            the current round's number. A page whose last drawing has this round is New (one drawing) or Revised.
+       · figma            the Figma file's URL up to "node-id=" (a drawing's "node" is appended), or give a drawing its own "url".
+       · assets           the folder the pictures are in, relative to this file. A picture is a full-page screenshot, never cropped.
+       · groups[]         id, letter (the Figma section's letter, or ""), name, short (for the outline, two or three words).
+       · pages[]          group, title, does (what the page does, one plain sentence), fig (its figure number this round),
+                          decisions (["D1"]: the decision cards about this page), final ("D Month", the day the reader said so; only on the reader's word),
+                          retired ("why, and what replaced it", only when the reader retired it), drawings[].
+       · drawings[]       round, at (local time "YYYY-MM-DDTHH:MM" the picture was saved), file, node, w, h (the picture's size),
+                          and what THAT drawing did, in plain words: problem, solution, changed (or one line in note). -->
+  <section class="blk"><details open data-sec="The pages">
+    <summary class="h"><span class="title">The pages</span><span class="sum">Every page drawn so far, its latest drawing first.</span><span class="badges"><span>N pages</span></span></summary>
+    <p>One card per page, showing its latest drawing and what it is for. This round's pages come first in each section. A page this round did not touch stays listed with the day and hour it was last drawn. Click a picture to open the page over the whole window.</p>
+    <dl class="kv key">
+      <div><dt><span class="st new">New</span></dt> <dd>First drawn this round.</dd></div>
+      <div><dt><span class="st revised">Revised</span></dt> <dd>Drawn before and redrawn this round.</dd></div>
+      <div><dt><span class="st unchanged">Unchanged</span></dt> <dd>Its latest drawing is from an earlier round and nothing has replaced it.</dd></div>
+      <div><dt><span class="st final">Final</span></dt> <dd>You said so. A later pin reopens it.</dd></div>
+      <div><dt><span class="st retired">Retired</span></dt> <dd>You retired it. Kept and dimmed, with the reason and its successor.</dd></div>
+    </dl>
+    <div id="planPages"></div>
+    <script type="application/json" id="plan-pages">
+{
+  "round": 2,
+  "figma": "",
+  "assets": "assets/YYYY-MM-DD-slug/",
+  "groups": [
+    { "id": "A", "letter": "A", "name": "The first section of the Figma page", "short": "First section" },
+    { "id": "B", "letter": "B", "name": "The second section", "short": "Second section" }
+  ],
+  "pages": [
+    { "group": "A", "title": "Module › Page name", "fig": 1, "does": "What the page does, in one plain sentence.", "decisions": ["D1"],
+      "drawings": [
+        { "round": 1, "at": "2026-01-05T10:15", "file": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1440' height='900'%3E%3Crect width='100%25' height='100%25' fill='%23f2f0ea'/%3E%3Ctext x='50%25' y='50%25' font-family='sans-serif' font-size='44' fill='%237a7772' text-anchor='middle'%3Eround 1 screenshot%3C/text%3E%3C/svg%3E", "w": 1440, "h": 900, "note": "First drawing." },
+        { "round": 2, "at": "2026-01-06T16:40", "file": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1440' height='1200'%3E%3Crect width='100%25' height='100%25' fill='%23f2f0ea'/%3E%3Ctext x='50%25' y='50%25' font-family='sans-serif' font-size='44' fill='%237a7772' text-anchor='middle'%3Eround 2 screenshot%3C/text%3E%3C/svg%3E", "w": 1440, "h": 1200,
+          "problem": "What was wrong or missing, in the reader's words where a pin said it.", "solution": "What this drawing does about it.", "changed": "What is different from the earlier drawing." }
+      ] },
+    { "group": "A", "title": "Module › A page this round did not touch", "does": "What the page does.",
+      "drawings": [
+        { "round": 1, "at": "2026-01-05T10:20", "file": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1440' height='900'%3E%3Crect width='100%25' height='100%25' fill='%23f2f0ea'/%3E%3Ctext x='50%25' y='50%25' font-family='sans-serif' font-size='44' fill='%237a7772' text-anchor='middle'%3Eround 1 screenshot%3C/text%3E%3C/svg%3E", "w": 1440, "h": 900, "note": "What its last drawing set." }
+      ] },
+    { "group": "B", "title": "Module › A new page", "fig": 2, "does": "What the page does.",
+      "drawings": [
+        { "round": 2, "at": "2026-01-06T16:55", "file": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1440' height='900'%3E%3Crect width='100%25' height='100%25' fill='%23f2f0ea'/%3E%3Ctext x='50%25' y='50%25' font-family='sans-serif' font-size='44' fill='%237a7772' text-anchor='middle'%3Eround 2 screenshot%3C/text%3E%3C/svg%3E", "w": 1440, "h": 900,
+          "problem": "The gap this page fills.", "solution": "What the page does about it.", "changed": "New page." }
+      ] }
+  ]
+}
+    </script>
+  </details></section>
+
+  <!-- DECISIONS: everything the reader must decide, the recommended option pre-marked. The number sits in .dn, the question
+       and its reason in .dq, the options in .dopts. data-place names the heading or section where the plan discusses the
+       decision; the pages that list the decision ("decisions": ["D1"]) are linked under it by the script, and the same
+       card appears in each of those pages' previews. A card written the short way (h4, p.why, labels) is wrapped for you. -->
   <section class="blk"><details open data-sec="Decisions">
-    <summary class="h"><span class="title">2 · Decisions</span><span class="sum">N decisions, recommendation pre-marked; answer and press Queue.</span><span class="badges"><span>3 min</span><span class="risk">1 touches prod</span></span></summary>
+    <summary class="h"><span class="title">Decisions</span><span class="sum">N decisions, recommendation pre-marked; answer and press Queue.</span><span class="badges"><span>3 min</span><span class="risk">1 touches prod</span></span></summary>
     <div class="dgrid">
-      <form class="dform" data-lavish-question="D1 example">
-        <h4>D1 · The question, as a question?</h4>
-        <p class="why">Why it matters and what breaks if the answer is wrong.</p>
-        <label><input type="radio" name="d1" value="Option A" checked> Option A <span class="rec">recommended</span></label>
-        <label><input type="radio" name="d1" value="Option B"> Option B</label>
-        <div class="row"><textarea placeholder="Optional note"></textarea><button type="button" onclick="queueDecision(this.form, 'D1 example')">Queue</button><span class="queued" hidden>queued</span></div>
+      <form class="dform" data-lavish-question="D1 example" data-place="Design">
+        <div class="dq">
+          <h4><span class="dn">D1</span>The question, as a question?</h4>
+          <p class="why">Why it matters and what breaks if the answer is wrong.</p>
+        </div>
+        <div class="dopts">
+          <label><input type="radio" name="d1" value="Option A" checked><span class="opt"><b>Option A:</b> what it means in one line</span> <span class="rec">recommended</span></label>
+          <label><input type="radio" name="d1" value="Option B"><span class="opt"><b>Option B:</b> what it means in one line</span></label>
+          <div class="row"><textarea placeholder="Optional note"></textarea><button type="button" onclick="queueDecision(this.form, 'D1 example')">Queue</button><span class="queued" hidden>queued</span></div>
+        </div>
       </form>
       <form class="dform" data-lavish-question="D2 example" data-decided="Yes (2026-09-02)">
-        <h4>D2 · A decision already taken</h4>
-        <p class="why">Keep decided ones visible with their answer, so the record stays in the plan.</p>
-        <label><input type="radio" name="d2" value="Yes" checked> Yes</label>
-        <label><input type="radio" name="d2" value="No"> No</label>
-        <div class="row"><textarea placeholder="Optional note"></textarea><button type="button" onclick="queueDecision(this.form, 'D2 example')">Queue</button><span class="queued" hidden>queued</span></div>
+        <div class="dq">
+          <h4><span class="dn">D2</span>A decision already taken</h4>
+          <p class="why">Keep decided ones visible with their answer, so the record stays in the plan.</p>
+        </div>
+        <div class="dopts">
+          <label><input type="radio" name="d2" value="Yes" checked><span class="opt"><b>Yes</b></span></label>
+          <label><input type="radio" name="d2" value="No"><span class="opt"><b>No</b></span></label>
+          <div class="row"><textarea placeholder="Optional note"></textarea><button type="button" onclick="queueDecision(this.form, 'D2 example')">Queue</button><span class="queued" hidden>queued</span></div>
+        </div>
       </form>
     </div>
     <h3>Alternatives, the standard table</h3>
@@ -194,14 +496,28 @@
     </tbody></table>
   </details></section>
 
-  <!-- 3+ · EVIDENCE: current state, design, execution, plan by PR, risks, open questions -->
+  <section class="blk"><details open data-sec="Open questions">
+    <summary class="h"><span class="title">Open questions</span><span class="sum">What still needs an answer from someone, each with the page it touches.</span><span class="badges"><span>1 min</span></span></summary>
+    <ul class="styled"><li>…</li></ul>
+  </details></section>
+
+  <section class="blk"><details open data-sec="Risks and what to review">
+    <summary class="h"><span class="title">Risks and what to review</span><span class="sum">Ordered by how silently it fails; what could not be verified is named.</span><span class="badges"><span>2 min</span></span></summary>
+    <ol class="styled"><li>Highest: RLS, money, migrations, Edge deploys.</li><li>Then: visual and cross-module effects.</li><li>Not verifiable here: …</li></ol>
+  </details></section>
+
+  <!-- ══ FOR THE BUILDER ══ Everything below this line is reference and build notes, closed by default. Keep the line and
+       keep these sections: other sessions and the planning flow read them. A choice that is hard to undo (the shape of
+       the data, money, a migration) is NOT left down here: it goes to the reader as a decision in plain words. -->
+  <div class="band" id="builder"><span class="band-t">For the builder</span><span class="band-s">Reference and build notes, closed by default. You can skip everything below this line: it is written for the session that builds the plan.</span></div>
+
   <section class="blk"><details data-sec="Current state">
-    <summary class="h"><span class="title">3 · Current state</span><span class="sum">What exists today, verified against the code, with file paths.</span><span class="badges"><span>4 min</span><span>verified against code</span></span></summary>
+    <summary class="h"><span class="title">Current state</span><span class="sum">What exists today, verified against the code, with file paths.</span><span class="badges"><span>4 min</span><span>verified against code</span></span></summary>
     <p>…</p>
   </details></section>
 
   <section class="blk"><details data-sec="Design">
-    <summary class="h"><span class="title">4 · Design</span><span class="sum">The target shape and how it differs from today.</span><span class="badges"><span>5 min</span></span></summary>
+    <summary class="h"><span class="title">Design</span><span class="sum">The target shape and how it differs from today.</span><span class="badges"><span>5 min</span></span></summary>
     <div class="mermaid-frame"><pre class="mmd">
 flowchart LR
   A[Today] --> B[Target]
@@ -217,7 +533,7 @@ flowchart LR
        Manager Marcus's planning flow reads this section (details[data-sec="Execution"]) and gives it to the
        planner as the draft of the hand-off's execution notes: keep the data-sec value as it is. -->
   <section class="blk"><details data-sec="Execution">
-    <summary class="h"><span class="title">5 · Execution</span><span class="sum">Which agents are started, in what order and lanes, and what you will see in Manager Marcus while it runs.</span><span class="badges"><span>2 min</span></span></summary>
+    <summary class="h"><span class="title">Execution</span><span class="sum">Which agents are started, in what order and lanes, and what you will see in Manager Marcus while it runs.</span><span class="badges"><span>2 min</span></span></summary>
     <p>How the work is run, in two or three sentences someone could follow: who coordinates, how many workers there are, what runs side by side and what has to wait for something else.</p>
     <div class="mermaid-frame"><pre class="mmd">
 flowchart LR
@@ -240,21 +556,11 @@ flowchart LR
   </details></section>
 
   <section class="blk"><details data-sec="Plan by PR">
-    <summary class="h"><span class="title">6 · Plan by PR</span><span class="sum">Landable slices in order; the strip shows live PR states inside Lavish.</span><span class="badges"><span>3 min</span><span class="risk">touches prod: migration</span></span></summary>
+    <summary class="h"><span class="title">Plan by PR</span><span class="sum">Landable slices in order; the strip shows live PR states inside Lavish.</span><span class="badges"><span>3 min</span><span class="risk">touches prod: migration</span></span></summary>
     <div class="phase" id="phase"><span data-pr="">PR1 · scope</span><span data-pr="">PR2 · scope</span><span data-pr="">PR3 · scope</span></div>
     <table><thead><tr><th>PR</th><th>Scope</th><th>Depends on</th><th>Verify by</th></tr></thead><tbody>
       <tr><td>PR1</td><td>…</td><td>–</td><td>…</td></tr>
     </tbody></table>
-  </details></section>
-
-  <section class="blk"><details data-sec="Risks and what to review">
-    <summary class="h"><span class="title">7 · Risks and what to review</span><span class="sum">Ordered by how silently it fails; what could not be verified is named.</span><span class="badges"><span>2 min</span></span></summary>
-    <ol class="styled"><li>Highest: RLS, money, migrations, Edge deploys.</li><li>Then: visual and cross-module effects.</li><li>Not verifiable here: …</li></ol>
-  </details></section>
-
-  <section class="blk"><details data-sec="Open questions">
-    <summary class="h"><span class="title">8 · Open questions</span><span class="sum">What still needs an answer from someone.</span><span class="badges"><span>1 min</span></span></summary>
-    <ul class="styled"><li>…</li></ul>
   </details></section>
 
   <!-- REVIEW: after the plan's first build, review-changes puts the Review and Pull requests tabs on this page through
@@ -264,7 +570,7 @@ flowchart LR
 <script src="assets/plan-template-review/view.js"></script>
 <!-- review-view:end -->
   <section class="blk"><details data-sec="Feedback log">
-    <summary class="h"><span class="title">9 · Feedback log</span><span class="sum">Every review round: what was received, what changed.</span><span class="badges"><span>log</span></span></summary>
+    <summary class="h"><span class="title">Feedback log</span><span class="sum">Every review round: what was received, what changed.</span><span class="badges"><span>log</span></span></summary>
     <ul id="feedlog" class="styled"></ul>
   </details></section>
 </main>
@@ -415,11 +721,26 @@ document.querySelectorAll("pre.mmd").forEach((p) => mermaidSources.push(p.innerH
 const cellText = (c) => c.textContent.replace(/\s+/g, " ").trim().replace(/\|/g, "\\|");
 function domToMd() {
   let md = "", mi = 0;
+  const line = (n) => (n ? n.textContent.replace(/\s+/g, " ").trim() : "");
+  const dlMd = (dl, skip) => [...dl.querySelectorAll(":scope > div")].filter((r) => !(skip && skip.test(line(r.querySelector("dt"))))).map((r) => `- **${line(r.querySelector("dt"))}:** ${line(r.querySelector("dd"))}\n`).join("") + "\n";
   const walk = (el) => {
     for (const node of el.children) {
       const t = node.tagName, cl = node.classList;
       if (t === "H1") md += `# ${node.textContent}\n\n`;
+      else if (t === "DL") md += dlMd(node);
+      else if (cl?.contains("meta") && node.querySelector("dl")) walk(node);
       else if (cl?.contains("kicker") || cl?.contains("meta")) md += `*${node.textContent.trim()}*\n\n`;
+      else if (cl?.contains("band")) md += `---\n\n**${line(node.querySelector(".band-t"))}.** ${line(node.querySelector(".band-s"))}\n\n`;
+      else if (cl?.contains("pagebar")) continue;
+      else if (t === "FIGURE") {   // a page of the register: its latest drawing only; earlier drawings are named in its Earlier row
+        const cap = node.querySelector("figcaption"), info = cap?.querySelector("dl.info");
+        if (node.dataset.state === "older") continue;
+        if (info) { md += `#### ${line(cap.querySelector("b"))} (${line(cap.querySelector(".st"))})\n\n` + dlMd(info, /^Comments$/); if (node.dataset.figma) md += `[Open in Figma](${node.dataset.figma})\n\n`; }
+        else if (cap) md += `*${line(cap)}*\n\n`;
+      }
+      else if (cl?.contains("said")) { for (const p of node.querySelectorAll("p")) md += `- ${line(p.querySelector(".when"))}: "${line(p.querySelector("q") || p)}"\n`; md += "\n"; }
+      else if (cl?.contains("example") && node.querySelector("dl")) md += `> **For example.** ${line(node.querySelector(".ex-title"))}\n\n` + dlMd(node.querySelector("dl"));
+      else if (cl?.contains("answer") && node.querySelector("dl")) { md += `> ${line(node.querySelector(".answer-lead"))}\n\n` + dlMd(node.querySelector("dl")); if (node.querySelector(".answer-count")) md += line(node.querySelector(".answer-count")) + "\n\n"; }
       else if (cl?.contains("mermaid-frame")) md += "```mermaid\n" + (mermaidSources[mi++] ?? "") + "\n```\n\n";
       else if (cl?.contains("stage")) { const note = document.getElementById("stageNote")?.textContent.trim(); if (note && !/appear here inside Lavish/.test(note)) md += `**Stage:** ${note}\n\n`; }
       else if (cl?.contains("example")) md += `> **For example.** ${node.textContent.replace(/\s+/g, " ").trim()}\n\n`;
@@ -429,8 +750,10 @@ function domToMd() {
       else if (cl?.contains("phase")) { md += [...node.children].map((c) => `- ${c.textContent.trim()}${c.className ? ` (${c.className})` : ""}`).join("\n") + "\n\n"; }
       else if (cl?.contains("dmirror")) md += `*Decision ${node.dataset.decision}: answered under Decisions.*\n\n`;
       else if (cl?.contains("dform")) {
-        md += `**${node.querySelector("h4")?.textContent}**${node.dataset.decided ? ` · decided: ${node.dataset.decided}` : ""}\n\n${node.querySelector(".why")?.textContent.trim() ?? ""}\n\n`;
+        const h4 = node.querySelector("h4"), dn = line(h4?.querySelector(".dn"));
+        md += `**${dn ? `${dn} · ${line(h4).slice(dn.length).trim()}` : line(h4)}**${node.dataset.decided ? ` · decided: ${node.dataset.decided}` : ""}\n\n${node.querySelector(".why")?.textContent.trim() ?? ""}\n\n`;
         node.querySelectorAll("label").forEach((l) => md += `- [${l.querySelector("input")?.checked ? "x" : " "}] ${l.textContent.replace(/\s+/g, " ").trim()}\n`);
+        if (node.querySelector(".drefs")) md += `\n*${line(node.querySelector(".drefs"))}*\n`;
         md += "\n";
       }
       else if (t === "SECTION" || t === "DETAILS" || t === "DIV" || t === "MAIN") walk(node);
@@ -492,6 +815,241 @@ mermaid.initialize({ startOnLoad: false, theme: "neutral", securityLevel: "loose
 // frame (a 7.5 MB script and a long-poll connection per diagram, measured 2026-10-11), which starved the page inside the
 // Manager Marcus review frame. Use class "mermaid" only when the reader asked for an editable whiteboard.
 mermaid.run({ querySelector: "pre.mmd" });
+</script>
+<script>
+/* ---------- layout (2026-11-10): the page register and its preview, the outline's children, links that jump ---------- */
+/* Everything here is optional per plan: a plan with no <script id="plan-pages"> simply has no register, no preview and
+   no outline children. Reads store and KEY from the script above. */
+(() => {
+  const root = document.documentElement, main = document.querySelector("main"), bar = document.getElementById("summarybar");
+  const setBar = () => root.style.setProperty("--bar-h", bar.offsetHeight + "px");   // the rail and the filter bar hang under the top bar, whatever its height
+  setBar(); addEventListener("resize", setBar);
+  const esc = (t) => String(t ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  /* With Annotate on, Lavish turns a click on anything but a button or a form control into a comment, links and outline
+     rows included. data-lavish-action hands the click back, so navigation stays navigation in both modes. */
+  const outlineEl = document.getElementById("outline"); outlineEl.setAttribute("data-lavish-action", "");
+
+  /* ── decisions: a card written the short way (h4, .why, labels) is wrapped so the question and its options sit side by side ── */
+  document.querySelectorAll(".dform").forEach((f) => {
+    if (f.querySelector(":scope > .dq")) return;
+    const dq = document.createElement("div"), dopts = document.createElement("div"); dq.className = "dq"; dopts.className = "dopts";
+    [...f.children].forEach((c) => (c.matches("h4, .why, .decided") ? dq : dopts).append(c));
+    f.append(dq, dopts);
+    const h4 = dq.querySelector("h4"), m = h4 && !h4.querySelector(".dn") && /^\s*(D\d+)\s*·\s*/.exec(h4.innerHTML);
+    if (m) h4.innerHTML = `<span class="dn">${m[1]}</span>` + h4.innerHTML.slice(m[0].length);
+  });
+  const decs = {};   // "D1" → its card under Decisions
+  document.querySelectorAll(".dform").forEach((f) => { const n = f.querySelector(".dn"); if (n && !f.closest(".dmirror")) decs[n.textContent.trim()] = f; });
+
+  /* ── the page register: one card per page, drawn from the JSON in <script id="plan-pages"> ── */
+  const holder = document.getElementById("planPages"), dataEl = document.getElementById("plan-pages");
+  let reg = null;
+  try { reg = holder && dataEl ? JSON.parse(dataEl.textContent) : null; } catch (e) { holder.textContent = "The page list could not be read: " + e.message; }
+  const WORD = { new: "New", revised: "Revised", unchanged: "Unchanged", final: "Final", retired: "Retired", older: "Replaced" };
+  if (reg) {
+    const src = (f) => (/^(data:|https?:|file:|\/)/.test(f) ? f : (reg.assets || "") + f);
+    const href = (d) => d.url || (reg.figma && d.node ? reg.figma + d.node : "");
+    const idOf = (d) => String(d.node || d.file).replace(/[^\w-]+/g, "-");
+    const when = (d) => { const t = d.at ? new Date(d.at) : null; return !t ? "" : isNaN(t) ? esc(d.at) : `${t.toLocaleDateString("en-GB", { day: "numeric", month: "short" })}, ${t.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }).toLowerCase()}`; };
+    const row = (label, html, attr = "") => (html ? `<div><dt>${label}</dt> <dd${attr}>${html}</dd></div>` : "");
+    const titleOf = (p, d) => (p.fig ? `Figure ${p.fig} · ` : "") + (d.title || p.title);
+    const stateOf = (p) => { const last = p.drawings.at(-1); return p.retired ? "retired" : p.final ? "final" : last.round === reg.round ? (p.drawings.length > 1 ? "revised" : "new") : "unchanged"; };
+    const card = (p, i, state) => {
+      const d = p.drawings[i], latest = i === p.drawings.length - 1, id = idOf(d), title = esc(titleOf(p, d)), url = href(d);
+      const st = latest ? state : "older", ds = latest ? p.decisions || [] : [];
+      const drawn = [when(d), d.round != null ? `round ${d.round}` : "", latest && state === "revised" ? `drawing ${p.drawings.length}` : "", latest ? "" : `replaced in round ${p.drawings[i + 1].round}`].filter(Boolean).join(" · ");
+      const earlier = latest ? p.drawings.slice(0, -1).map((e) => `<a href="${esc(href(e) || "#")}" data-pv="pg-${idOf(e)}" title="Preview this earlier drawing">round ${e.round}${when(e) ? ", " + when(e) : ""}</a>`).join(" · ") : "";
+      const rows = row("Drawn", drawn) + row("What it does", esc(p.does)) + row("Problem", esc(d.problem)) + row("Solution", esc(d.solution)) + row("What changed", esc(d.changed))
+        + row(latest ? "Last drawing" : "This drawing", esc(d.note))
+        + (latest ? row("Retired because", typeof p.retired === "string" ? esc(p.retired) : "") + row("Final since", typeof p.final === "string" ? esc(p.final) : "") : "")
+        + row("To decide", ds.length ? `<a href="#" data-pv="pg-${id}" title="Open this page with its decision cards">${esc(ds.join(", "))}</a>` : "", " data-lavish-action")
+        + row("Comments", '<span class="cc">none yet</span>', " data-lavish-action") + row("Earlier", earlier, " data-lavish-action");
+      return `<figure class="pcard" data-state="${st}"${p.fig && latest ? ` data-fig="${esc(p.fig)}"` : ""}${ds.length ? ` data-decisions="${esc(ds.join(" "))}"` : ""} data-figma="${esc(url)}">`
+        + `<button type="button" class="shot" data-lavish-action aria-label="Preview: ${title}"><img id="pg-${id}" loading="lazy" decoding="async"${d.w && d.h ? ` width="${+d.w}" height="${+d.h}"` : ""} src="${esc(src(d.file))}" alt="${title}"></button>`
+        + `<figcaption class="figcap" id="cap-${id}"><span class="st ${st}">${WORD[st]}</span><b>${title}</b><dl class="kv info">${rows}</dl>`
+        + (url ? `<span class="links" data-lavish-action><a href="${esc(url)}" target="_blank" rel="noopener">Open in Figma ↗</a></span>` : "") + `</figcaption></figure>`;
+    };
+    const RANK = { new: 0, revised: 0, final: 1, unchanged: 1, retired: 2 };
+    const groups = (reg.groups || []).map((g) => {
+      const pages = reg.pages.map((p, n) => ({ p, n, state: stateOf(p) })).filter((x) => x.p.group === g.id)
+        .sort((a, b) => RANK[a.state] - RANK[b.state] || (RANK[a.state] === 1 ? b.p.drawings.at(-1).round - a.p.drawings.at(-1).round : 0) || a.n - b.n);
+      if (!pages.length) return "";
+      const now = pages.filter((x) => RANK[x.state] === 0).length;
+      const cards = pages.map(({ p, state }) => card(p, p.drawings.length - 1, state) + p.drawings.slice(0, -1).map((_, i) => card(p, i, state)).join("")).join("");
+      return `<div class="pgroup" id="grp-${esc(g.id)}" data-letter="${esc(g.letter || "")}" data-name="${esc(g.short || g.name)}" data-pages="${pages.length}" data-now="${now}">`
+        + `<h3>${g.letter ? `<span class="gl">${esc(g.letter)}</span>` : ""}${esc(g.name)} <span class="gc">${pages.length} page${pages.length === 1 ? "" : "s"} · ${now ? now + " drawn this round" : "none drawn this round"}</span></h3><div class="sheet">${cards}</div></div>`;
+    }).join("");
+    holder.innerHTML = `<div class="pagebar" id="pagebar">
+      <div class="seg" role="group" aria-label="Show"><span class="seg-l">Show</span>
+        <button type="button" data-f="latest">Latest of each page<i></i></button><button type="button" data-f="round">This round<i></i></button><button type="button" data-f="unchanged">Unchanged<i></i></button>
+        <button type="button" data-f="final">Final<i></i></button><button type="button" data-f="retired">Retired<i></i></button><button type="button" data-f="all">Every drawing<i></i></button></div>
+      <div class="seg" role="group" aria-label="Picture size"><span class="seg-l">Picture size</span>
+        <button type="button" data-z="s">S</button><button type="button" data-z="m">M</button><button type="button" data-z="l" title="The whole picture, one per row">L</button></div></div>` + groups;
+  }
+  const pagesSec = holder?.closest("details[data-sec]"), groups = [...document.querySelectorAll(".pgroup")], cards = [...document.querySelectorAll(".pcard")];
+
+  /* the filters and the picture size */
+  const FILTERS = { latest: (s) => s !== "older", round: (s) => s === "new" || s === "revised", unchanged: (s) => s === "unchanged", final: (s) => s === "final", retired: (s) => s === "retired", all: () => true };
+  const fbtns = [...document.querySelectorAll("#pagebar [data-f]")], zbtns = [...document.querySelectorAll("#pagebar [data-z]")];
+  function setFilter(f) {
+    cards.forEach((c) => { c.hidden = !FILTERS[f](c.dataset.state); });
+    groups.forEach((g) => { g.hidden = !g.querySelector(".pcard:not([hidden])"); });
+    fbtns.forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.f === f)));
+    spy();
+  }
+  fbtns.forEach((b) => {
+    const n = cards.filter((c) => FILTERS[b.dataset.f](c.dataset.state)).length;   // counted from the cards, so a number cannot drift from the list
+    b.querySelector("i").textContent = n; b.hidden = !n && b.dataset.f !== "latest"; b.onclick = () => setFilter(b.dataset.f);
+  });
+  function setSize(z) { main.dataset.z = z; zbtns.forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.z === z))); store.set(KEY + ":size", z); }
+  zbtns.forEach((b) => { b.onclick = () => setSize(b.dataset.z); });
+  if (zbtns.length) setSize(store.get(KEY + ":size", "m"));
+
+  /* ── the outline: one row per section of the register, and a label where the builder's part starts ── */
+  // ponytail: the children are a <div> inside the <ol>, not <li>s, because the navigation script below treats every <li> of the outline as a section
+  const list = document.getElementById("outlineList"), rowOf = (sec) => [...list.children].find((el) => el.dataset && el.dataset.sec === sec);
+  const subs = document.createElement("div"); subs.className = "subs";
+  groups.forEach((g) => {
+    const a = document.createElement("a"); a.href = "#" + g.id; a.title = `${g.dataset.pages} pages, ${g.dataset.now} drawn this round`;
+    a.innerHTML = `<span class="gl">${esc(g.dataset.letter)}</span><span class="gt">${esc(g.dataset.name)}</span><span class="c"><b>${+g.dataset.now || ""}</b><span>${g.dataset.pages}</span></span>`;
+    a.onclick = (e) => { e.preventDefault(); pagesSec.open = true; if (g.hidden) setFilter("latest"); g.scrollIntoView({ block: "start" }); };
+    subs.appendChild(a);
+  });
+  if (groups.length) { subs.insertAdjacentHTML("beforeend", '<span class="leg"><b>Blue</b> drawn this round · grey pages in the section</span>'); rowOf(pagesSec.dataset.sec)?.after(subs); }
+  const firstBuilder = document.querySelector(".band ~ section.blk details[data-sec]"), builderRow = firstBuilder && rowOf(firstBuilder.dataset.sec);
+  if (builderRow) { const d = document.createElement("div"); d.className = "olabel"; d.textContent = document.querySelector(".band .band-t")?.textContent || "For the builder"; builderRow.before(d); }
+  const links = [...subs.querySelectorAll("a")];
+  function spy() {
+    if (!links.length) return;
+    const line = bar.offsetHeight + 150;   // just under the top bar and the filter bar
+    const cur = pagesSec.open && groups.find((g) => { if (g.hidden) return false; const r = g.getBoundingClientRect(); return r.top <= line && r.bottom > line; });
+    links.forEach((a) => a.classList.toggle("is-active", !!cur && a.hash === "#" + cur.id));
+  }
+  addEventListener("scroll", () => requestAnimationFrame(spy), { passive: true });
+  if (fbtns.length) setFilter("latest");
+
+  /* ── the preview: a page opened over the whole window, without leaving this one. Its picture and its details are MOVED
+     into the preview and back, and carry ids, so a comment made there stays attached to that page.
+     Not a <dialog>: a modal dialog sits above Lavish's annotation card and makes it unclickable. ── */
+  const pv = document.createElement("div"); pv.id = "pv"; pv.className = "pv"; pv.hidden = true;
+  pv.innerHTML = `<div class="pv-bar" data-lavish-action><span class="st"></span><b class="pv-title"></b><span class="pv-n"></span>
+    <button type="button" data-pv-do="prev" title="Previous page (left arrow)">← Previous</button><button type="button" data-pv-do="next" title="Next page (right arrow)">Next →</button>
+    <a class="pv-figma" target="_blank" rel="noopener">Open in Figma ↗</a><button type="button" data-pv-do="close" title="Close (Esc)">Close</button></div>
+    <div class="pv-main"><div class="pv-body"></div><aside class="pv-side" aria-label="About this page"><div class="pv-extra"></div></aside></div>
+    <div class="pv-hint" data-lavish-action>With Annotate on, click the picture or a line of the details to comment on this page. Arrow keys step through the pages on the list; Esc closes.</div>`;
+  document.body.appendChild(pv);
+  const pvBody = pv.querySelector(".pv-body"), pvSide = pv.querySelector(".pv-side"), pvExtra = pv.querySelector(".pv-extra");
+  let shown = null, backY = 0;
+  const redrawPins = () => dispatchEvent(new Event("resize"));   // Lavish redraws its comment pins on resize
+  const putBack = () => { shown.querySelector(".shot").append(pvBody.querySelector("img")); shown.append(pvSide.querySelector("figcaption")); };
+  function show(card) {
+    if (shown) putBack(); else { backY = scrollY; document.body.classList.add("pv-open"); pv.hidden = false; }
+    shown = card;
+    const img = card.querySelector(".shot img"), cap = card.querySelector("figcaption");
+    const st = cap.querySelector(".st"), vis = cards.filter((c) => !c.hidden), i = vis.indexOf(card), fig = pv.querySelector(".pv-figma");
+    pv.querySelector(".st").className = st.className; pv.querySelector(".st").textContent = st.textContent;
+    pv.querySelector(".pv-title").textContent = cap.querySelector("b").textContent;
+    pv.querySelector(".pv-n").textContent = i < 0 ? "an earlier drawing" : `${i + 1} of ${vis.length}`;
+    fig.hidden = !card.dataset.figma; fig.href = card.dataset.figma || "#";
+    img.loading = "eager"; pvBody.append(img); pvBody.scrollTop = 0; pvSide.prepend(cap); pvSide.scrollTop = 0;
+    // The page's decision cards, as mirrors of the ones under Decisions: an answer in either copy is kept in step by the script above.
+    pvExtra.innerHTML = "";
+    const ds = (card.dataset.decisions || "").split(" ").filter((d) => decs[d]);
+    if (ds.length) pvExtra.insertAdjacentHTML("beforeend", "<h4>To decide on this page</h4>");
+    ds.forEach((d) => {
+      const m = document.createElement("div"); m.className = "dmirror"; m.dataset.decision = decs[d].dataset.lavishQuestion || d; m.setAttribute("data-lavish-action", "");
+      const copy = decs[d].cloneNode(true); copy.querySelector(".drefs")?.remove(); m.append(copy); pvExtra.append(m);
+    });
+    pv.querySelector('[data-pv-do="close"]').focus(); redrawPins();
+  }
+  function hide() {
+    if (!shown) return;
+    const card = shown; putBack(); shown = null; pv.hidden = true; document.body.classList.remove("pv-open");
+    scrollTo({ top: backY, behavior: "instant" }); card.querySelector(".shot").focus({ preventScroll: true }); redrawPins();
+  }
+  function step(d) { const vis = cards.filter((c) => !c.hidden); if (vis.length) show(vis[(vis.indexOf(shown) + d + vis.length) % vis.length]); }
+  document.addEventListener("click", (e) => {
+    const shot = e.target.closest(".pcard .shot"), other = e.target.closest("a[data-pv]"), act = e.target.closest("[data-pv-do]");
+    if (shot) show(shot.closest(".pcard"));
+    else if (other) { const el = document.getElementById(other.dataset.pv); if (el) { e.preventDefault(); show(el.closest(".pcard") || shown); } }
+    else if (act) ({ prev: () => step(-1), next: () => step(1), close: hide })[act.dataset.pvDo]();
+  });
+  addEventListener("keydown", (e) => {
+    if (!shown || (e.target !== document.body && !e.target.closest?.("#pv"))) return;   // typing in Lavish's comment card: leave the keys to it
+    if (e.key === "Escape") hide(); else if (e.key === "ArrowRight") step(1); else if (e.key === "ArrowLeft") step(-1);
+  });
+
+  /* ── comments: Lavish marks a commented element with data-lavish-note-state but keeps the comment's text in its own rail,
+     so a page can say how many comments it has and in what state, not what they say. ── */
+  const noted = (el) => (el ? [...el.querySelectorAll("[data-lavish-note-state]")].concat(el.matches("[data-lavish-note-state]") ? [el] : []) : []);
+  function countComments() {
+    cards.forEach((card) => {
+      const cap = document.getElementById("cap-" + card.dataset.pid);
+      const els = noted(cap).concat(noted(document.getElementById("pg-" + card.dataset.pid))), by = {}, cc = cap?.querySelector(".cc"); if (!cc) return;
+      els.forEach((el) => { const s = el.getAttribute("data-lavish-note-state") || "private"; by[s] = (by[s] || 0) + 1; });
+      cc.classList.toggle("has", els.length > 0);
+      cc.textContent = els.length ? `${els.length} on this page (${Object.entries(by).map(([s, n]) => `${n} ${s}`).join(", ")}). Their text is in Lavish's Comments rail; the numbered pins match.` : "none yet";
+    });
+  }
+  cards.forEach((c) => { c.dataset.pid = c.querySelector(".shot img").id.slice(3); });
+  let ccFrame = 0;
+  if (cards.length) {
+    new MutationObserver(() => { if (!ccFrame) ccFrame = requestAnimationFrame(() => { ccFrame = 0; countComments(); }); })
+      .observe(document.body, { subtree: true, attributes: true, attributeFilter: ["data-lavish-note-state"] });
+    countComments();
+    // A click on a comment in Lavish's rail: if its page is not the one in the preview, show that page (or leave the preview).
+    addEventListener("message", (e) => {
+      const sel = e.data && e.data.type === "lavish:selectAnchor" && (e.data.selector || e.data.anchor?.selector); if (!sel || !shown) return;
+      let el = null; try { el = document.querySelector(sel); } catch { /* not a selector this page can read */ }
+      const card = el?.closest(".pcard"); if (card) show(card); else if (el && !el.closest("#pv")) hide();
+    });
+  }
+
+  /* ── links that jump: "figure 12", "figures 12–16, 21" and "D5" in the text, every <a href="#id">, and each decision's "Refers to" ── */
+  function go(el) {
+    const d = el.closest("details"); if (d) d.open = true;
+    if (el.hidden) setFilter("latest");
+    el.scrollIntoView({ block: "center" }); el.classList.add("is-target"); setTimeout(() => el.classList.remove("is-target"), 2000);
+  }
+  const jump = (el, text) => { const a = document.createElement("a"); a.href = "#"; a.className = "ref"; a.setAttribute("data-lavish-action", ""); a.textContent = text; a.onclick = (e) => { e.preventDefault(); go(el); }; return a; };
+  main.querySelectorAll('a[href^="#"]').forEach((a) => {
+    if (a.getAttribute("href").length < 2 || a.dataset.pv) return;
+    a.setAttribute("data-lavish-action", "");
+    a.addEventListener("click", (e) => { const el = document.getElementById(decodeURIComponent(a.hash.slice(1))); if (el) { e.preventDefault(); go(el); } });
+  });
+  const figs = {}; cards.forEach((c) => { if (c.dataset.fig) figs[c.dataset.fig] = c; });
+  const RE = /\b([Ff]igures?\s)(\d+(?:[–-]\d+)?(?:(?:, | and )\d+(?:[–-]\d+)?)*)|\b(D\d{1,2})\b/g;
+  const walker = document.createTreeWalker(main, NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) => (n.parentElement.closest("a, button, summary, script, textarea, .pcard, .dn, .pagebar, .key") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+  });
+  const texts = []; while (walker.nextNode()) texts.push(walker.currentNode);
+  if (Object.keys(figs).length || Object.keys(decs).length) texts.forEach((node) => {
+    const s = node.nodeValue; RE.lastIndex = 0; if (!RE.test(s)) return;
+    const frag = document.createDocumentFragment(); let at = 0; RE.lastIndex = 0;
+    for (let m; (m = RE.exec(s)); ) {
+      frag.append(s.slice(at, m.index)); at = RE.lastIndex;
+      if (m[3]) { frag.append(decs[m[3]] ? jump(decs[m[3]], m[0]) : m[0]); continue; }
+      frag.append(m[1]);
+      m[2].split(/(\d+)/).forEach((part, i) => frag.append(i % 2 && figs[part] ? jump(figs[part], part) : part));
+    }
+    frag.append(s.slice(at)); node.replaceWith(frag);
+  });
+  // Each decision card says which pages it is about (the pages that list it) and where the plan discusses it (data-place).
+  const place = (t) => [...main.querySelectorAll("h3")].find((h) => h.textContent.trim().startsWith(t)) || [...document.querySelectorAll("details[data-sec]")].find((d) => d.dataset.sec.startsWith(t));
+  Object.entries(decs).forEach(([d, form]) => {
+    const pages = cards.filter((c) => c.dataset.state !== "older" && (c.dataset.decisions || "").split(" ").includes(d)), el = form.dataset.place && place(form.dataset.place);
+    if (!pages.length && !el) return;
+    const p = document.createElement("p"); p.className = "drefs"; p.setAttribute("data-lavish-action", ""); p.append("Refers to ");
+    pages.forEach((card, i) => {
+      const a = document.createElement("a"), title = card.querySelector("figcaption b").textContent;
+      a.href = "#"; a.dataset.pv = "pg-" + card.dataset.pid; a.title = "Open " + title; a.textContent = card.dataset.fig ? "Figure " + card.dataset.fig : title.length > 34 ? title.slice(0, 32) + "…" : title;
+      p.append(i ? " · " : "", a);
+    });
+    if (el) p.append(pages.length ? " · " : "", jump(el, "the plan: " + form.dataset.place));
+    form.querySelector(".dq").append(p);
+  });
+})();
 </script>
 <script>
 /* Built-in plan navigation: existing plans gain it without editing their files. */

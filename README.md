@@ -12,7 +12,7 @@ pins one upstream version, patches it with the features we rely on, and adds the
 | `tools/lavish-meta.mjs` | `lavish-meta <plan.html> --status … --pr … --progress …`: the plan registry (status, PRs, progress log) the home page shows. |
 | `tools/lavish-home.mjs` | The **home page** on http://127.0.0.1:4388: every plan of every project (Drive-style, tags, filters), per-plan page with the conversation, private comments, versions (view / diff / restore), sessions, history, and **Resume / New session** that reopens the agent that wrote the plan in a tmux terminal. No dependencies. |
 | `tools/lavish-agent.mjs`, `lavish-chats.mjs`, `lavish-lib.mjs` | Session liveness, resume / launch argv, saved chats and delivery ownership, shared helpers. |
-| `tools/plan-template.html` | The starting point for every plan (answer → decisions → evidence, sticky outline, Mermaid, export dialog, feedback log). |
+| `tools/plan-template.html` | The starting point for every plan (the reader's sections first: answer → pages → decisions; the builder's below a marked line; outline rail, a register of pages drawn from JSON with a full-window preview, Mermaid, export dialog, feedback log). |
 | `extras/review-changes/` | The **review-changes** skill + `review-checklist` CLI: after a PR lands, a checklist of things the reviewer tries in the app is built onto the plan page (where, do, expect, screenshot), ticked in the browser, and the agent's fixes land under each row. |
 | `extras/verify-changes/` | The **verify-changes** skill + `/verify` command: a manifest of falsifiable UI checks written during the work, then driven through Playwright against a dev server as a service account, with a bounded auto-fix loop. Per project. |
 
