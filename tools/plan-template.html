@@ -331,6 +331,11 @@
   .cc.has { color: var(--accent); font-weight: 600; }
   @media (max-width: 900px) { .pv-main { flex-direction: column-reverse; } .pv-side { width: auto; max-height: 40vh; border-left: 0; border-bottom: 1px solid var(--hairline); } }
   .pv-body img { display: block; margin: 0 auto; max-width: 100%; height: auto; border: 1px solid #d6d1c7; border-radius: 6px; background: #fff; }
+  /* a comment pinned to a spot of a page: the marker sits over the picture, on the thumbnail and in the preview */
+  .sheet .shot, .pv-pic { position: relative; }
+  .pv-pic { width: fit-content; max-width: 100%; margin: 0 auto; cursor: crosshair; }
+  span.spot { position: absolute; z-index: 1; box-sizing: border-box; width: 16px; height: 16px; margin: -8px 0 0 -8px; border: 2px solid var(--accent);
+    border-radius: 50% !important; background: rgba(255, 255, 255, .55); box-shadow: 0 0 0 2px #fff, 0 1px 4px rgba(0, 0, 0, .3); font-size: 0; }
   .pv-hint { flex: none; padding: 7px 18px; background: var(--paper); border-top: 1px solid var(--hairline); font-size: 12.5px; color: var(--ink-3); }
   a.ref { text-decoration-style: dotted; text-underline-offset: 3px; }
   .is-target { outline: 2px solid var(--accent); outline-offset: 8px; border-radius: 6px; }
@@ -936,13 +941,13 @@ mermaid.run({ querySelector: "pre.mmd" });
   pv.innerHTML = `<div class="pv-bar" data-lavish-action><span class="st"></span><b class="pv-title"></b><span class="pv-n"></span>
     <button type="button" data-pv-do="prev" title="Previous page (left arrow)">← Previous</button><button type="button" data-pv-do="next" title="Next page (right arrow)">Next →</button>
     <a class="pv-figma" target="_blank" rel="noopener">Open in Figma ↗</a><button type="button" data-pv-do="close" title="Close (Esc)">Close</button></div>
-    <div class="pv-main"><div class="pv-body"></div><aside class="pv-side" aria-label="About this page"><div class="pv-extra"></div></aside></div>
-    <div class="pv-hint" data-lavish-action>With Annotate on, click the picture or a line of the details to comment on this page. Arrow keys step through the pages on the list; Esc closes.</div>`;
+    <div class="pv-main"><div class="pv-body"><div class="pv-pic"></div></div><aside class="pv-side" aria-label="About this page"><div class="pv-extra"></div></aside></div>
+    <div class="pv-hint" data-lavish-action>With Annotate on, click a spot on the picture to pin a comment there, or a line of the details to comment on the page. Arrow keys step through the pages on the list; Esc closes.</div>`;
   document.body.appendChild(pv);
-  const pvBody = pv.querySelector(".pv-body"), pvSide = pv.querySelector(".pv-side"), pvExtra = pv.querySelector(".pv-extra");
+  const pvBody = pv.querySelector(".pv-body"), pvPic = pv.querySelector(".pv-pic"), pvSide = pv.querySelector(".pv-side"), pvExtra = pv.querySelector(".pv-extra");
   let shown = null, backY = 0;
   const redrawPins = () => dispatchEvent(new Event("resize"));   // Lavish redraws its comment pins on resize
-  const putBack = () => { shown.querySelector(".shot").append(pvBody.querySelector("img")); shown.append(pvSide.querySelector("figcaption")); };
+  const putBack = () => { dropNew(); shown.querySelector(".shot").append(...pvPic.children); shown.append(pvSide.querySelector("figcaption")); };
   function show(card) {
     if (shown) putBack(); else { backY = scrollY; document.body.classList.add("pv-open"); pv.hidden = false; }
     shown = card;
@@ -952,7 +957,7 @@ mermaid.run({ querySelector: "pre.mmd" });
     pv.querySelector(".pv-title").textContent = cap.querySelector("b").textContent;
     pv.querySelector(".pv-n").textContent = i < 0 ? "an earlier drawing" : `${i + 1} of ${vis.length}`;
     fig.hidden = !card.dataset.figma; fig.href = card.dataset.figma || "#";
-    img.loading = "eager"; pvBody.append(img); pvBody.scrollTop = 0; pvSide.prepend(cap); pvSide.scrollTop = 0;
+    img.loading = "eager"; pvPic.append(...card.querySelector(".shot").children); pvBody.scrollTop = 0; pvSide.prepend(cap); pvSide.scrollTop = 0;
     // The page's decision cards, as mirrors of the ones under Decisions: an answer in either copy is kept in step by the script above.
     pvExtra.innerHTML = "";
     const ds = (card.dataset.decisions || "").split(" ").filter((d) => decs[d]);
@@ -986,7 +991,7 @@ mermaid.run({ querySelector: "pre.mmd" });
   function countComments() {
     cards.forEach((card) => {
       const cap = document.getElementById("cap-" + card.dataset.pid);
-      const els = noted(cap).concat(noted(document.getElementById("pg-" + card.dataset.pid))), by = {}, cc = cap?.querySelector(".cc"); if (!cc) return;
+      const els = noted(cap).concat(noted(document.getElementById("pg-" + card.dataset.pid)?.parentNode)), by = {}, cc = cap?.querySelector(".cc"); if (!cc) return;
       els.forEach((el) => { const s = el.getAttribute("data-lavish-note-state") || "private"; by[s] = (by[s] || 0) + 1; });
       cc.classList.toggle("has", els.length > 0);
       cc.textContent = els.length ? `${els.length} on this page (${Object.entries(by).map(([s, n]) => `${n} ${s}`).join(", ")}). Their text is in Lavish's Comments rail; the numbered pins match.` : "none yet";
@@ -1003,8 +1008,43 @@ mermaid.run({ querySelector: "pre.mmd" });
       const sel = e.data && e.data.type === "lavish:selectAnchor" && (e.data.selector || e.data.anchor?.selector); if (!sel || !shown) return;
       let el = null; try { el = document.querySelector(sel); } catch { /* not a selector this page can read */ }
       const card = el?.closest(".pcard"); if (card) show(card); else if (el && !el.closest("#pv")) hide();
-    });
+    }, true);   // capture: the page is in the preview before Lavish scrolls to the comment's element
   }
+
+  /* ── a comment pinned to a spot of a page. With Annotate on, a click on the picture in the preview is anchored to a
+     small marker at that point, not to the whole picture. The marker's id says the page and the place
+     (spot-<page>-x<‰ across>-y<‰ down>) and Lavish keeps each comment's selector, so the markers are rebuilt from the
+     comments themselves on every load: nothing is stored here. A marker sits beside its picture, so it shows on the
+     thumbnail too and moves into the preview with it. ── */
+  const spotRe = /#(spot-(.+)-x(\d+)-y(\d+))$/;
+  function spot(id, pid, x, y) {
+    const img = document.getElementById("pg-" + pid); if (!img) return null;
+    let s = document.getElementById(id); if (s) return s;
+    s = document.createElement("span"); s.className = "spot"; s.id = id; s.style.left = x / 10 + "%"; s.style.top = y / 10 + "%";
+    const title = (document.getElementById("cap-" + pid)?.querySelector("b")?.textContent || "").trim();
+    s.textContent = `Pin at ${x / 10}% across, ${y / 10}% down on ${title}`;   // what the agent is told about the place
+    img.after(s); return s;
+  }
+  const dropNew = () => document.querySelectorAll(".spot.new:not([data-lavish-note-state])").forEach((s) => s.remove());
+  addEventListener("click", (e) => {
+    const img = e.target; if (!shown || !e.isTrusted || img.parentNode !== pvPic || img.tagName !== "IMG") return;
+    const r = img.getBoundingClientRect(), pm = (v) => Math.max(0, Math.min(1000, Math.round(v * 1000)));
+    const pid = img.id.slice(3), x = pm((e.clientX - r.left) / r.width), y = pm((e.clientY - r.top) / r.height);
+    e.preventDefault(); e.stopImmediatePropagation(); dropNew();
+    const s = spot(`spot-${pid}-x${x}-y${y}`, pid, x, y); s.classList.add("new");
+    // Hand Lavish a click on the marker. It cancels the clicks it takes, so an untaken one means Annotate is off.
+    if (s.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, clientX: e.clientX, clientY: e.clientY }))) return s.remove();
+    // Esc on the comment box leaves a marker with no comment: drop it when the box goes. A queued one comes back below.
+    const host = [...document.documentElement.children, ...document.body.children].find((el) => el.shadowRoot?.querySelector(".lavish-annotation-card"));
+    if (host) new MutationObserver((_, ob) => { if (!host.shadowRoot.querySelector(".lavish-annotation-card")) { ob.disconnect(); dropNew(); } }).observe(host.shadowRoot, { childList: true });
+  }, true);
+  // Before Lavish looks for the comments' elements (a capture listener on the window runs first), make the markers they name.
+  addEventListener("message", (e) => {
+    if (e.source !== parent || e.data?.type !== "lavish:resolveAnchors" || !Array.isArray(e.data.anchors)) return;
+    const keep = new Set();
+    e.data.anchors.forEach((a) => { const m = spotRe.exec(String(a.selector || "")); if (m && spot(m[1], m[2], +m[3], +m[4])) keep.add(m[1]); });
+    document.querySelectorAll(".spot").forEach((s) => { if (keep.has(s.id)) s.classList.remove("new"); else if (!s.classList.contains("new")) s.remove(); });
+  }, true);
 
   /* ── links that jump: "figure 12", "figures 12–16, 21" and "D5" in the text, every <a href="#id">, and each decision's "Refers to" ── */
   function go(el) {

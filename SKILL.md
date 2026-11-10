@@ -81,13 +81,19 @@ whiteboard: the editor turns every `.mermaid` container into a 7.5 MB whiteboard
   black + brass; the annotation card inside the artifact matches.
 - **Comment mode** (top bar, "Agent | Notes"): in Agent mode what the user writes on an element is queued
   for the agent; in Notes mode everything he writes is a private comment. The annotation card follows the
-  mode (primary button "Queue" vs "Save private note", the other one swaps in as secondary).
+  mode: Enter (or the round send button) queues in Agent mode and saves a private note in Notes mode.
+- **The comment box is Figma's** (Marcus, 10 Nov 2026; `sdk:card-figma*` in `patch-lavish.mjs`): one rounded field
+  that says "Add a comment" and a round send button. No heading, no hint line, no Cancel and no Keep private:
+  **Enter queues, Esc closes the box, with text in it too**, and a private note is made from Notes mode. Empty,
+  the paperclip (attach), the pencil (Suggest edit, on text) and the send button sit beside the field; with text,
+  the field takes the whole width and they move to a row below. The hint line appears only to report an
+  attachment error.
 - **Comments rail** — a column between the artifact and the Conversation panel, toggled with the
   "Comments · n" button; it opens by itself the first time a comment exists. Every comment is a card
   anchored to an element, Google-Docs style: commented elements carry a faint tint and a numbered pin,
   **clicking a card scrolls the artifact to its element and highlights it** (Esc clears), clicking a pin
   selects the card, cards follow document order.
-  - **Private** comments: "Keep private" on the card, Notes mode, "+ Private note" for a general note, or
+  - **Private** comments: Notes mode, "+ Private note" for a general note, "Keep private" on a queued card, or
     `window.lavish.privateNote(text, opts)` from artifact code. Saved on this machine
     (`~/.lavish-axi/notes/<key>.json` through the home page; localStorage while it is down). **They are
     never delivered to the agent — do not read `~/.lavish-axi/notes/` unless the user asks you to.** They
@@ -354,6 +360,14 @@ The skeleton, which the user approved on 2026-09-02 and revised on 2026-11-10:
   that must stay clickable carries `data-lavish-action` (the template sets it on the outline, on `href="#…"`
   links and on its own controls). A modal `<dialog>` sits above Lavish's comment card: never use one for
   something the reader should be able to comment on.
+- **A comment pinned to a spot of a page** (10 Nov 2026): in the preview, with Annotate on, a click on the picture
+  anchors the comment to a small marker at that point, not to the whole picture. Nothing to author: the template
+  makes the marker, shows it on the thumbnail too, and rebuilds every marker from the comments' selectors on load
+  (no storage). **Reading one as the agent:** the item's selector ends in `#spot-<page>-x<n>-y<n>`, where `<page>`
+  is the page's id (its Figma node with `-` for `:`), and x and y are thousandths of the picture's width and
+  height from its top-left corner; its `text` says the same in words ("Pin at 42% across, 29.4% down on
+  <title>"). Open that page's picture and look at that place before answering (crop around it when the picture
+  is tall); a comment on a spot is about what is drawn there, not about the page as a whole.
 - **Execution section** (`details[data-sec="Execution"]`, between Design and Plan by PR): which agents are
   started, in what order and in which lanes, with ONE diagram (one box per agent, an arrow for "waits for"),
   a table of the same (order, lane, agent, what it does, when it starts), and a paragraph headed "What you
